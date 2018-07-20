@@ -1,0 +1,15 @@
+[package]
+name = "netdb"
+version = "0.1.0"
+authors = ["Paul Sajna <sajattack@gmail.com>"]
+build = "build.rs"
+
+[build-dependencies]
+cbindgen = { path = "../../cbindgen" }
+
+[dependencies]
+arpainet = { path = "../arpainet" }
+platform = { path = "../platform" }
+netinet = { path = "../netinet" }
+sys_socket = { path = "../sys_socket" }
+time = { path = "../time" }
