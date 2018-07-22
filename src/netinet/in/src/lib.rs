@@ -12,7 +12,7 @@ pub type in_addr_t = u32;
 pub type in_port_t = u16;
 
 #[repr(C)]
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct in_addr {
     pub s_addr: in_addr_t
 }

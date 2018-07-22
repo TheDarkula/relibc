@@ -8,7 +8,7 @@ extern crate platform;
 use core::ptr;
 use platform::types::*;
 
-mod constants;
+pub mod constants;
 use constants::*;
 
 pub type in_addr_t = [u8; 4];

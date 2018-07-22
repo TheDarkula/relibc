@@ -12,6 +12,8 @@ use syscall::{self, Result};
 use types::*;
 use *;
 
+pub mod rlb;
+
 #[repr(C)]
 struct SockData {
     port: in_port_t,

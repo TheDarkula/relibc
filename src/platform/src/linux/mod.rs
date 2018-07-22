@@ -8,6 +8,8 @@ const AT_EMPTY_PATH: c_int = 0x1000;
 const AT_REMOVEDIR: c_int = 0x200;
 const AT_SYMLINK_NOFOLLOW: c_int = 0x100;
 
+pub const SEEK_SET: c_int = 0;
+
 // Also in sys_utsname. Has to be both because cbindgen
 const UTSLENGTH: usize = 65;
 
