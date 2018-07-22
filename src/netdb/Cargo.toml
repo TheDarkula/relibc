@@ -9,7 +9,11 @@ cbindgen = { path = "../../cbindgen" }
 
 [dependencies]
 arpainet = { path = "../arpainet" }
+errno  = { path = "../errno" }
+fcntl = { path = "../fcntl" }
 platform = { path = "../platform" }
 netinet = { path = "../netinet" }
 sys_socket = { path = "../sys_socket" }
+stdlib = { path = "../stdlib" }
+string = { path = "../string" }
 time = { path = "../time" }

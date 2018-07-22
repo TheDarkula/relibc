@@ -29,9 +29,21 @@ pub use sys::*;
 #[path = "linux/mod.rs"]
 mod sys;
 
+
+#[cfg(all(not(feature = "no_std"), target_os = "linux"))]
+#[path = "linux/rlb.rs"]
+pub mod rlb;
+
 #[cfg(all(not(feature = "no_std"), target_os = "redox"))]
 #[path = "redox/mod.rs"]
 mod sys;
+
+
+#[cfg(all(not(feature = "no_std"), target_os = "redox"))]
+#[path = "redox/rlb.rs"]
+pub mod rlb;
+
+pub mod rawfile;
 
 pub mod types;
 

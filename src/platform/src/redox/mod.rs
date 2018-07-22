@@ -20,6 +20,7 @@ extern "C" fn sig_handler(sig: usize) {
         callback(sig as c_int);
     }
 }
+pub mod rlb;
 
 #[repr(C)]
 struct SockData {
