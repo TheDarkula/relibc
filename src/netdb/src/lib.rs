@@ -177,7 +177,7 @@ static mut S_LINE: RawLineBuffer = RawLineBuffer {
     read: 0,
     buf: [0; 8 * 1024],
 };
-static mut SERV_STAYOPEN = 0;
+static mut SERV_STAYOPEN: c_int = 0;
 
 fn lookup_host(host: &str) -> Result<LookupHost, ()> {
     let mut dns_string: String = String::new();
@@ -186,7 +186,7 @@ fn lookup_host(host: &str) -> Result<LookupHost, ()> {
     }
     #[cfg(target_os = "linux")] {
         let fd = platform::open(b"/etc/resolv.conf\0".as_ptr() as *const i8, O_RDONLY, 0);
-        let mut rlb = RawLineBuffer::new(fd as usize);
+        let mut rlb = RawLineBuffer::new(fd);
         for line in rlb.next() {
             let line = String::from(line); 
             if line.starts_with("nameserver") {
@@ -293,7 +293,7 @@ fn lookup_addr(addr: in_addr) -> Result<Vec<Vec<u8>>, ()> {
     }
     #[cfg(target_os = "linux")] {
         let fd = platform::open(b"/etc/resolv.conf".as_ptr() as *const i8, O_RDONLY, 0);
-        let mut rlb = RawLineBuffer::new(fd as usize);
+        let mut rlb = RawLineBuffer::new(fd);
         for line in rlb.next() {
             let line = String::from(line); 
             if line.starts_with("nameserver") {
@@ -490,7 +490,7 @@ pub unsafe extern "C" fn gethostbyname(name: *const c_char) -> *const hostent {
 pub unsafe extern "C" fn gethostent() -> *const hostent {
     if HOSTDB == 0 {
         HOSTDB = open(cstr_from_bytes_with_nul_unchecked(b"/etc/hosts\0"), O_RDONLY, 0);
-        H_LINE = RawLineBuffer::new(HOSTDB as usize);
+        H_LINE = RawLineBuffer::new(HOSTDB);
     }
 
     let mut r: Box<str> = Box::default();
@@ -499,7 +499,8 @@ pub unsafe extern "C" fn gethostent() -> *const hostent {
             Some(s) => s,
             None => {
                 if HOST_STAYOPEN == 0 { endhostent(); }
-                return ptr::null(),
+                return ptr::null();
+            }
         };
     }
     
@@ -556,7 +557,7 @@ pub unsafe extern "C" fn getnetent() -> *const netent {
 pub unsafe extern "C" fn getprotoent() -> *const protoent {
     if PROTODB == 0 {
         PROTODB = open(cstr_from_bytes_with_nul_unchecked(b"/etc/protocols\0"), O_RDONLY, 0);
-        P_LINE = RawLineBuffer::new(PROTODB as usize);
+        P_LINE = RawLineBuffer::new(PROTODB);
     }
 
     let mut r: Box<str> = Box::default();
@@ -644,7 +645,7 @@ pub unsafe extern "C" fn getservbyport(
 pub unsafe extern "C" fn getservent() -> *const servent {
     if SERVDB == 0 {
         SERVDB = platform::open(b"/etc/services".as_ptr() as *const c_char, O_RDONLY, 0);
-        S_LINE = RawLineBuffer::new(SERVDB as usize);
+        S_LINE = RawLineBuffer::new(SERVDB);
     }
 
     let mut r: Box<str> = Box::default();
@@ -653,7 +654,7 @@ pub unsafe extern "C" fn getservent() -> *const servent {
             Some(s) => s,
             None => {
                 if SERV_STAYOPEN == 0 { endservent(); }
-                return ptr::null(),
+                return ptr::null();
             }
         };
     }
@@ -699,7 +700,7 @@ pub unsafe extern "C" fn sethostent(stayopen: c_int) {
     } else {
        platform::lseek(HOSTDB, 0, SEEK_SET);
     }
-    H_LINE = RawLineBuffer::new(HOSTDB as usize);
+    H_LINE = RawLineBuffer::new(HOSTDB);
 }
 
 pub unsafe extern "C" fn setnetent(stayopen: c_int) {
@@ -709,7 +710,7 @@ pub unsafe extern "C" fn setnetent(stayopen: c_int) {
     } else {
        platform::lseek(NETDB, 0, SEEK_SET);
     }
-    N_LINE = RawLineBuffer::new(NETDB as usize);
+    N_LINE = RawLineBuffer::new(NETDB);
 }
 
 pub unsafe extern "C" fn setprotoent(stayopen: c_int) {
@@ -719,7 +720,7 @@ pub unsafe extern "C" fn setprotoent(stayopen: c_int) {
     } else {
        platform::lseek(PROTODB, 0, SEEK_SET);
     }
-    P_LINE = RawLineBuffer::new(PROTODB as usize);
+    P_LINE = RawLineBuffer::new(PROTODB);
 }
 
 
@@ -730,7 +731,7 @@ pub unsafe extern "C" fn setservent(stayopen: c_int) {
     } else {
        platform::lseek(SERVDB, 0, SEEK_SET);
     }
-    S_LINE = RawLineBuffer::new(SERVDB as usize);
+    S_LINE = RawLineBuffer::new(SERVDB);
 }
 
 pub unsafe extern "C" fn getaddrinfo(

@@ -88,7 +88,6 @@ impl<'a> From<&'a timespec> for redox_timespec {
 }
 
 #[repr(C)]
-#[derive(Default)]
 pub struct stat {
     pub st_dev: dev_t,
     pub st_ino: ino_t,
@@ -108,8 +107,32 @@ pub struct stat {
     // Compared to glibc, our struct is for some reason 48 bytes too small.
     // Accessing atime works, so clearly the struct isn't incorrect...
     // This works.
-    pub _pad: [u8; 48]
+    pub _pad: [u8; 48],
 }
+
+impl Default for stat {
+    fn default() -> stat { 
+        stat {
+            st_dev: 0,
+            st_ino: 0,
+            st_nlink: 0,
+            st_mode: 0,
+            st_uid: 0,
+            st_gid: 0,
+            st_rdev: 0,
+            st_size: 0,
+            st_blksize: 0,
+            st_blocks: 0,
+
+            st_atim: 0,
+            st_mtim: 0,
+            st_ctim: 0,
+
+            _pad: [0u8; 48],
+        }
+    }
+}
+
 
 pub const AF_INET: c_int = 2;
 pub const SOCK_STREAM: c_int = 1;

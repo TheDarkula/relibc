@@ -13,16 +13,6 @@ pub const SEEK_SET: c_int = 0;
 // Also in sys_utsname. Has to be both because cbindgen
 const UTSLENGTH: usize = 65;
 
-#[repr(C)]
-pub struct utsname {
-    pub sysname: [c_char; UTSLENGTH],
-    pub nodename: [c_char; UTSLENGTH],
-    pub release: [c_char; UTSLENGTH],
-    pub version: [c_char; UTSLENGTH],
-    pub machine: [c_char; UTSLENGTH],
-    pub domainname: [c_char; UTSLENGTH],
-}
-
 fn e(sys: usize) -> usize {
     if (sys as isize) < 0 && (sys as isize) >= -256 {
         unsafe {
