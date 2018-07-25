@@ -12,6 +12,8 @@ use syscall::{self, Result};
 use types::*;
 use *;
 
+pub const SEEK_SET: c_int = 0;
+
 #[thread_local]
 static mut SIG_HANDLER: Option<extern "C" fn(c_int)> = None;
 

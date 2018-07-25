@@ -10,9 +10,6 @@ const AT_SYMLINK_NOFOLLOW: c_int = 0x100;
 
 pub const SEEK_SET: c_int = 0;
 
-// Also in sys_utsname. Has to be both because cbindgen
-const UTSLENGTH: usize = 65;
-
 fn e(sys: usize) -> usize {
     if (sys as isize) < 0 && (sys as isize) >= -256 {
         unsafe {
