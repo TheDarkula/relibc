@@ -105,11 +105,7 @@ pub struct addrinfo {
     ai_next: *const addrinfo, /* next structure in linked list */
 }
 
-static mut HOSTDB: c_int = 0;
 static mut NETDB: c_int = 0;
-static mut PROTODB: c_int = 0;
-static mut SERVDB: c_int = 0;
-
 static mut NET_ENTRY: netent = netent {
     n_name: 0 as *const c_char,
     n_aliases: 0 as *const *const c_char,
@@ -125,7 +121,9 @@ static mut N_LINE: RawLineBuffer = RawLineBuffer {
     read: 0,
     buf: [0; 8 * 1024],
 };
+static mut NET_STAYOPEN: c_int = 0;
 
+static mut HOSTDB: c_int = 0;
 static mut HOST_ENTRY: hostent = hostent {
     h_name: 0 as *const c_char,
     h_aliases: 0 as *const *const c_char,
@@ -143,7 +141,9 @@ static mut H_LINE: RawLineBuffer = RawLineBuffer {
     read: 0,
     buf: [0; 8 * 1024],
 };
+static mut HOST_STAYOPEN: c_int = 0;
 
+static mut PROTODB: c_int = 0;
 static mut PROTO_ENTRY: protoent = protoent {
     p_name: 0 as *const c_char,
     p_aliases: 0 as *const *const c_char,
@@ -158,7 +158,9 @@ static mut P_LINE: RawLineBuffer = RawLineBuffer {
     read: 0,
     buf: [0; 8 * 1024],
 };
+static mut PROTO_STAYOPEN: c_int = 0;
 
+static mut SERVDB: c_int = 0;
 static mut SERV_ENTRY: servent = servent {
     s_name: 0 as *const c_char,
     s_aliases: 0 as *const *const c_char,
@@ -175,6 +177,7 @@ static mut S_LINE: RawLineBuffer = RawLineBuffer {
     read: 0,
     buf: [0; 8 * 1024],
 };
+static mut SERV_STAYOPEN = 0;
 
 fn lookup_host(host: &str) -> Result<LookupHost, ()> {
     let mut dns_string: String = String::new();
@@ -432,6 +435,7 @@ pub unsafe extern "C" fn endservent() {
     platform::close(SERVDB);
 }
 
+//TODO read hosts file
 pub unsafe extern "C" fn gethostbyaddr(v: *const c_void, length: socklen_t, format:c_int) -> *const hostent {
     let mut addr: in_addr = *(v as *mut in_addr);
     match lookup_addr(addr) {
@@ -455,6 +459,7 @@ pub unsafe extern "C" fn gethostbyaddr(v: *const c_void, length: socklen_t, form
     }
 }
 
+//TODO Read hosts file
 pub unsafe extern "C" fn gethostbyname(name: *const c_char) -> *const hostent {
     // XXX h_errno
     let mut addr = mem::uninitialized();
@@ -492,7 +497,9 @@ pub unsafe extern "C" fn gethostent() -> *const hostent {
     while r.is_empty() || r.split_whitespace().next() == None || r.starts_with("#") {
         r = match H_LINE.next() {
             Some(s) => s,
-            None => return ptr::null(),
+            None => {
+                if HOST_STAYOPEN == 0 { endhostent(); }
+                return ptr::null(),
         };
     }
     
@@ -520,7 +527,6 @@ pub unsafe extern "C" fn gethostent() -> *const hostent {
         host_aliases.push(alias);
     }
 
-    //push a 0 so c doesn't segfault when it tries to read the next entry
     host_aliases.push(vec![b'\0']);
 
     HOST_ENTRY = hostent { 
@@ -557,7 +563,10 @@ pub unsafe extern "C" fn getprotoent() -> *const protoent {
     while r.is_empty() || r.split_whitespace().next() == None || r.starts_with("#") {
         r = match P_LINE.next() {
             Some(s) => s,
-            None => return ptr::null(),
+            None => {
+                if PROTO_STAYOPEN == 0 { endprotoent(); } 
+                return ptr::null();
+            },
         };
     }
     
@@ -579,7 +588,7 @@ pub unsafe extern "C" fn getprotoent() -> *const protoent {
         alias.push(b'\0');
         proto_aliases.push(alias);
     }
-    //push a 0 so c doesn't segfault when it tries to read the next entry
+
     proto_aliases.push(vec![b'\0']);
     PROTO_ENTRY = protoent { 
         p_name: proto_name.as_slice().as_ptr() as *const c_char,
@@ -588,6 +597,7 @@ pub unsafe extern "C" fn getprotoent() -> *const protoent {
     };
         PROTO_ALIASES = Some(proto_aliases);
         PROTO_NAME = Some(proto_name); 
+        if PROTO_STAYOPEN == 0 { endprotoent(); }
         &PROTO_ENTRY as *const protoent
 }
 
@@ -595,7 +605,7 @@ pub unsafe extern "C" fn getservbyname(
     name: *const c_char,
     proto: *const c_char) 
 -> *const servent {
-    setservent(0);
+
     let mut p: *const servent;
 
     while { p = getservent(); p!=ptr::null() } {
@@ -613,7 +623,6 @@ pub unsafe extern "C" fn getservbyname(
             cp = cp.offset(1);
         }
     }
-    endservent();
     platform::errno = ENOENT;
     ptr::null() as *const servent
 }
@@ -622,14 +631,12 @@ pub unsafe extern "C" fn getservbyport(
     port: c_int,
     proto: *const c_char) 
 -> *const servent {
-    setprotoent(0);
     let mut p: *const servent;
     while { p=getservent(); p!=ptr::null()} {
         if (*p).s_port == port && strcmp((*p).s_proto, proto) == 0 {
             return p;
         }
     }
-    endprotoent();
     platform::errno = ENOENT;
     ptr::null()
 }
@@ -644,7 +651,10 @@ pub unsafe extern "C" fn getservent() -> *const servent {
     while r.is_empty() || r.split_whitespace().next() == None || r.starts_with("#") {
         r = match S_LINE.next() {
             Some(s) => s,
-            None => return ptr::null(),
+            None => {
+                if SERV_STAYOPEN == 0 { endservent(); }
+                return ptr::null(),
+            }
         };
     }
     let mut iter: SplitWhitespace = r.split_whitespace();
@@ -677,6 +687,8 @@ pub unsafe extern "C" fn getservent() -> *const servent {
     SERV_ALIASES = Some(serv_aliases);
     SERV_NAME = Some(serv_name);
     SERV_PROTO = Some(proto);
+    if SERV_STAYOPEN == 0 { endservent(); }
+
     &SERV_ENTRY as *const servent
 }
 
@@ -691,7 +703,7 @@ pub unsafe extern "C" fn sethostent(stayopen: c_int) {
 }
 
 pub unsafe extern "C" fn setnetent(stayopen: c_int) {
-    //TODO stayopen
+    NET_STAYOPEN = stayopen;
     if NETDB == 0 {
         NETDB = platform::open(b"/etc/networks\0".as_ptr() as *const c_char, O_RDONLY, 0)
     } else {
@@ -701,7 +713,7 @@ pub unsafe extern "C" fn setnetent(stayopen: c_int) {
 }
 
 pub unsafe extern "C" fn setprotoent(stayopen: c_int) {
-    //TODO stayopen
+    PROTO_STAYOPEN = stayopen;
     if PROTODB == 0 {
         PROTODB = platform::open(b"/etc/protocols\0".as_ptr() as *const c_char, O_RDONLY, 0)
     } else {
@@ -712,7 +724,7 @@ pub unsafe extern "C" fn setprotoent(stayopen: c_int) {
 
 
 pub unsafe extern "C" fn setservent(stayopen: c_int) {
-    //TODO stayopen
+    SERV_STAYOPEN = stayopen;
     if SERVDB == 0 {
         SERVDB = platform::open(b"/etc/services\0".as_ptr() as *const c_char, O_RDONLY, 0)
     } else {

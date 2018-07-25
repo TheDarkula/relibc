@@ -24,6 +24,7 @@ grp = { path = "src/grp" }
 inttypes = { path = "src/inttypes" }
 locale = { path = "src/locale" }
 netinet = { path = "src/netinet" }
+netdb = { path = "src/netdb" }
 platform = { path = "src/platform" }
 setjmp = { path = "src/setjmp" }
 semaphore = { path = "src/semaphore" }

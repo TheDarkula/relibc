@@ -213,6 +213,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "netdb"
+version = "0.1.0"
+dependencies = [
+ "arpainet 0.1.0",
+ "cbindgen 0.5.2",
+ "errno 0.1.0",
+ "fcntl 0.1.0",
+ "netinet 0.1.0",
+ "platform 0.1.0",
+ "stdlib 0.1.0",
+ "string 0.1.0",
+ "sys_socket 0.1.0",
+ "time 0.1.0",
+]
+
+[[package]]
 name = "netinet"
 version = "0.1.0"
 dependencies = [
@@ -308,6 +324,7 @@ dependencies = [
  "grp 0.1.0",
  "inttypes 0.1.0",
  "locale 0.1.0",
+ "netdb 0.1.0",
  "netinet 0.1.0",
  "platform 0.1.0",
  "semaphore 0.1.0",
