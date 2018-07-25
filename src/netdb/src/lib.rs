@@ -501,6 +501,7 @@ pub unsafe extern "C" fn gethostent() -> *const hostent {
                 if HOST_STAYOPEN == 0 { endhostent(); }
                 return ptr::null();
             }
+            None => return ptr::null(),
         };
     }
     
@@ -589,7 +590,6 @@ pub unsafe extern "C" fn getprotoent() -> *const protoent {
         alias.push(b'\0');
         proto_aliases.push(alias);
     }
-
     proto_aliases.push(vec![b'\0']);
     PROTO_ENTRY = protoent { 
         p_name: proto_name.as_slice().as_ptr() as *const c_char,
@@ -606,7 +606,6 @@ pub unsafe extern "C" fn getservbyname(
     name: *const c_char,
     proto: *const c_char) 
 -> *const servent {
-
     let mut p: *const servent;
 
     while { p = getservent(); p!=ptr::null() } {
@@ -689,7 +688,6 @@ pub unsafe extern "C" fn getservent() -> *const servent {
     SERV_NAME = Some(serv_name);
     SERV_PROTO = Some(proto);
     if SERV_STAYOPEN == 0 { endservent(); }
-
     &SERV_ENTRY as *const servent
 }
 
