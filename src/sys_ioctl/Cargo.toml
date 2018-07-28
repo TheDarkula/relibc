@@ -1,0 +1,10 @@
+[package]
+name = "sys_ioctl"
+version = "0.1.0"
+authors = ["jD91mZM2 <me@krake.one>"]
+
+[build-dependencies]
+cbindgen = { path = "../../cbindgen" }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+platform = { path = "../platform" }

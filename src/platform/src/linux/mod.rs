@@ -4,6 +4,8 @@ use alloc::String;
 use errno;
 use types::*;
 
+const TIOCGWINSZ: c_ulong = 0x5413;
+
 const AT_FDCWD: c_int = -100;
 const AT_EMPTY_PATH: c_int = 0x1000;
 const AT_REMOVEDIR: c_int = 0x200;
@@ -106,6 +108,10 @@ pub fn ftruncate(fildes: c_int, length: off_t) -> c_int {
     e(unsafe { syscall!(FTRUNCATE, fildes, length) }) as c_int
 }
 
+pub fn futimens(fd: c_int, times: *const timespec) -> c_int {
+    e(unsafe { syscall!(UTIMENSAT, fd, ptr::null::<c_char>(), times, 0) }) as c_int
+}
+
 pub fn getcwd(buf: *mut c_char, size: size_t) -> *mut c_char {
     if e(unsafe { syscall!(GETCWD, buf, size) }) == !0 {
         ptr::null_mut()
@@ -114,16 +120,24 @@ pub fn getcwd(buf: *mut c_char, size: size_t) -> *mut c_char {
     }
 }
 
+pub fn getdents(fd: c_int, dirents: *mut dirent, bytes: usize) -> c_int {
+    unsafe { syscall!(GETDENTS64, fd, dirents, bytes) as c_int }
+}
+
 pub fn getegid() -> gid_t {
-    e(unsafe { syscall!(GETEGID) })
+    e(unsafe { syscall!(GETEGID) }) as gid_t
 }
 
 pub fn geteuid() -> uid_t {
-    e(unsafe { syscall!(GETEUID) })
+    e(unsafe { syscall!(GETEUID) }) as uid_t
 }
 
 pub fn getgid() -> gid_t {
-    e(unsafe { syscall!(GETGID) })
+    e(unsafe { syscall!(GETGID) }) as gid_t
+}
+
+pub fn getrusage(who: c_int, r_usage: *mut rusage) -> c_int {
+    e(unsafe { syscall!(GETRUSAGE, who, r_usage) }) as c_int
 }
 
 pub unsafe fn gethostname(mut name: *mut c_char, len: size_t) -> c_int {
@@ -154,6 +168,10 @@ pub unsafe fn gethostname(mut name: *mut c_char, len: size_t) -> c_int {
     0
 }
 
+pub fn getitimer(which: c_int, out: *mut itimerval) -> c_int {
+    e(unsafe { syscall!(GETITIMER, which, out) }) as c_int
+}
+
 pub unsafe fn getpeername(
     socket: c_int,
     address: *mut sockaddr,
@@ -163,15 +181,15 @@ pub unsafe fn getpeername(
 }
 
 pub fn getpgid(pid: pid_t) -> pid_t {
-    e(unsafe { syscall!(GETPGID, pid) })
+    e(unsafe { syscall!(GETPGID, pid) }) as pid_t
 }
 
 pub fn getpid() -> pid_t {
-    e(unsafe { syscall!(GETPID) })
+    e(unsafe { syscall!(GETPID) }) as pid_t
 }
 
 pub fn getppid() -> pid_t {
-    e(unsafe { syscall!(GETPPID) })
+    e(unsafe { syscall!(GETPPID) }) as pid_t
 }
 
 pub unsafe fn getsockname(
@@ -201,8 +219,22 @@ pub fn getsockopt(
     }) as c_int
 }
 
+pub fn gettimeofday(tp: *mut timeval, tzp: *mut timezone) -> c_int {
+    e(unsafe { syscall!(GETTIMEOFDAY, tp, tzp) }) as c_int
+}
+
 pub fn getuid() -> uid_t {
-    e(unsafe { syscall!(GETUID) })
+    e(unsafe { syscall!(GETUID) }) as uid_t
+}
+
+pub fn ioctl(fd: c_int, request: c_ulong, out: *mut c_void) -> c_int {
+    // TODO: Somehow support varargs to syscall??
+    e(unsafe { syscall!(IOCTL, fd, request, out) }) as c_int
+}
+
+pub fn isatty(fd: c_int) -> c_int {
+    let mut winsize = winsize::default();
+    (ioctl(fd, TIOCGWINSZ, &mut winsize as *mut _ as *mut c_void) == 0) as c_int
 }
 
 pub fn kill(pid: pid_t, sig: c_int) -> c_int {
@@ -302,6 +334,10 @@ pub unsafe fn sendto(
     e(syscall!(
         SENDTO, socket, buf, len, flags, dest_addr, dest_len
     )) as ssize_t
+}
+
+pub fn setitimer(which: c_int, new: *const itimerval, old: *mut itimerval) -> c_int {
+    e(unsafe { syscall!(SETITIMER, which, new, old) }) as c_int
 }
 
 pub fn setpgid(pid: pid_t, pgid: pid_t) -> c_int {

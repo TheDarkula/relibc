@@ -52,6 +52,7 @@ EXPECT_BINS=\
 	unistd/fsync \
 	unistd/ftruncate \
 	unistd/getopt \
+	unistd/isatty \
 	unistd/pipe \
 	unistd/rmdir \
 	unistd/sleep \
@@ -65,9 +66,13 @@ EXPECT_BINS=\
 # Binaries that may generate varied output
 BINS=\
 	$(EXPECT_BINS) \
+	dirent \
+	pwd \
+	resource/getrusage \
 	stdlib/alloc \
 	stdlib/bsearch \
 	stdlib/mktemp \
+	time/gettimeofday \
 	unistd/chdir \
 	unistd/gethostname \
 	unistd/getid \

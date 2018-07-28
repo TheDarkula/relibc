@@ -12,7 +12,7 @@ impl RawFile {
         }
     }
 
-    pub fn dup(&self, _buf: &[u8]) -> Result<RawFile, ()> {
+    pub fn dup(&self) -> Result<RawFile, ()> {
         match dup(self.0) {
             -1 => Err(()),
             n => Ok(RawFile(n))

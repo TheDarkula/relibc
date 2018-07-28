@@ -38,6 +38,8 @@ pub mod rlb;
 
 pub mod types;
 
+pub use rawfile::RawFile;
+
 use alloc::Vec;
 use core::{fmt, ptr};
 
@@ -64,6 +66,7 @@ pub unsafe fn c_str_mut<'a>(s: *mut c_char) -> &'a mut [u8] {
 }
 
 pub unsafe fn c_str_n_mut<'a>(s: *mut c_char, n: usize) -> &'a mut [u8] {
+    assert!(s != ptr::null_mut());
     use core::slice;
 
     let mut size = 0;
@@ -84,6 +87,7 @@ pub unsafe fn c_str<'a>(s: *const c_char) -> &'a [u8] {
 }
 
 pub unsafe fn c_str_n<'a>(s: *const c_char, n: usize) -> &'a [u8] {
+    assert!(s != ptr::null());
     use core::slice;
 
     let mut size = 0;
