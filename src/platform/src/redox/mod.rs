@@ -8,6 +8,7 @@ use syscall::data::Stat as redox_stat;
 use syscall::data::TimeSpec as redox_timespec;
 use syscall::flag::*;
 use syscall::{self, Result};
+use rawfile::file_read_all;
 
 use types::*;
 use *;
