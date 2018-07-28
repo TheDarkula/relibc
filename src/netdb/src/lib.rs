@@ -34,7 +34,7 @@ use errno::*;
 use fcntl::O_RDONLY;
 
 use platform::types::*;
-use platform::rlb::RawLineBuffer;
+use platform::rlb::{Line, RawLineBuffer};
 use platform::{c_str, open, cstr_from_bytes_with_nul_unchecked, SEEK_SET};
 
 use dns::{Dns, DnsQuery};
@@ -114,12 +114,7 @@ static mut NET_ENTRY: netent = netent {
 static mut NET_NAME: Option<Vec<u8>> = None;
 static mut NET_ALIASES: [*const c_char; MAXALIASES] = [ptr::null(); MAXALIASES];
 static mut NET_NUM: Option<u64> = None;
-static mut N_LINE: RawLineBuffer = RawLineBuffer {
-    fd: 0,
-    cur: 0,
-    read: 0,
-    buf: [0; 8 * 1024],
-};
+static mut N_LINE: Option<RawLineBuffer> = None;
 static mut NET_STAYOPEN: c_int = 0;
 
 static mut HOSTDB: c_int = 0;
@@ -135,12 +130,7 @@ static mut HOST_ALIASES: Option<Vec<Vec<u8>>> = None;
 static mut HOST_ADDR: Option<in_addr> = None;
 static mut HOST_ADDR_LIST: [*mut c_char; 2] = [ptr::null_mut(); 2];
 static mut _HOST_ADDR_LIST: [u8;4] = [0u8;4];
-static mut H_LINE: RawLineBuffer = RawLineBuffer {
-    fd: 0,
-    cur: 0,
-    read: 0,
-    buf: [0; 8 * 1024],
-};
+static mut H_LINE: Option<RawLineBuffer> = None;
 static mut HOST_STAYOPEN: c_int = 0;
 
 static mut PROTODB: c_int = 0;
@@ -152,12 +142,7 @@ static mut PROTO_ENTRY: protoent = protoent {
 static mut PROTO_NAME: Option<Vec<u8>> = None;
 static mut PROTO_ALIASES: Option<Vec<Vec<u8>>> = None;
 static mut PROTO_NUM: Option<c_int> = None;
-static mut P_LINE: RawLineBuffer = RawLineBuffer {
-    fd: 0,
-    cur: 0,
-    read: 0,
-    buf: [0; 8 * 1024],
-};
+static mut P_LINE: Option<RawLineBuffer> = None;
 static mut PROTO_STAYOPEN: c_int = 0;
 
 static mut SERVDB: c_int = 0;
@@ -171,13 +156,12 @@ static mut SERV_NAME: Option<Vec<u8>> = None;
 static mut SERV_ALIASES: Option<Vec<Vec<u8>>> = None;
 static mut SERV_PORT: Option<c_int> = None;
 static mut SERV_PROTO: Option<Vec<u8>> = None;
-static mut S_LINE: RawLineBuffer = RawLineBuffer {
-    fd: 0,
-    cur: 0,
-    read: 0,
-    buf: [0; 8 * 1024],
-};
+static mut S_LINE: Option<RawLineBuffer> = None;
 static mut SERV_STAYOPEN: c_int = 0;
+
+fn bytes_to_box_str(bytes: &[u8]) -> Box<str> {
+    Box::from(core::str::from_utf8(bytes).unwrap_or(""))
+}
 
 fn lookup_host(host: &str) -> Result<LookupHost, ()> {
     let mut dns_string = platform::get_dns_server();
@@ -470,18 +454,17 @@ pub unsafe extern "C" fn gethostbyname(name: *const c_char) -> *const hostent {
 pub unsafe extern "C" fn gethostent() -> *const hostent {
     if HOSTDB == 0 {
         HOSTDB = open(cstr_from_bytes_with_nul_unchecked(b"/etc/hosts\0"), O_RDONLY, 0);
-        H_LINE = RawLineBuffer::new(HOSTDB);
+        H_LINE = Some(RawLineBuffer::new(HOSTDB));
     }
 
     let mut r: Box<str> = Box::default();
     while r.is_empty() || r.split_whitespace().next() == None || r.starts_with("#") {
-        r = match H_LINE.next() {
-            Some(s) => s,
-            None => {
+        r = match H_LINE.as_mut().unwrap().next() {
+            Line::Some(s) => bytes_to_box_str(s),
+            _ => {
                 if HOST_STAYOPEN == 0 { endhostent(); }
                 return ptr::null();
             }
-            None => return ptr::null(),
         };
     }
 
@@ -545,14 +528,14 @@ pub unsafe extern "C" fn getnetent() -> *const netent {
 pub unsafe extern "C" fn getprotoent() -> *const protoent {
     if PROTODB == 0 {
         PROTODB = open(cstr_from_bytes_with_nul_unchecked(b"/etc/protocols\0"), O_RDONLY, 0);
-        P_LINE = RawLineBuffer::new(PROTODB);
+        P_LINE = Some(RawLineBuffer::new(PROTODB));
     }
 
     let mut r: Box<str> = Box::default();
     while r.is_empty() || r.split_whitespace().next() == None || r.starts_with("#") {
-        r = match P_LINE.next() {
-            Some(s) => s,
-            None => {
+        r = match P_LINE.as_mut().unwrap().next() {
+            Line::Some(s) => bytes_to_box_str(s),
+            _ => {
                 if PROTO_STAYOPEN == 0 { endprotoent(); }
                 return ptr::null();
             },
@@ -634,14 +617,14 @@ pub unsafe extern "C" fn getservbyport(
 pub unsafe extern "C" fn getservent() -> *const servent {
     if SERVDB == 0 {
         SERVDB = platform::open(b"/etc/services".as_ptr() as *const c_char, O_RDONLY, 0);
-        S_LINE = RawLineBuffer::new(SERVDB);
+        S_LINE = Some(RawLineBuffer::new(SERVDB));
     }
 
     let mut r: Box<str> = Box::default();
     while r.is_empty() || r.split_whitespace().next() == None || r.starts_with("#") {
-        r = match S_LINE.next() {
-            Some(s) => s,
-            None => {
+        r = match S_LINE.as_mut().unwrap().next() {
+            Line::Some(s) => bytes_to_box_str(s),
+            _ => {
                 if SERV_STAYOPEN == 0 { endservent(); }
                 return ptr::null();
             }
@@ -689,7 +672,7 @@ pub unsafe extern "C" fn sethostent(stayopen: c_int) {
     } else {
        platform::lseek(HOSTDB, 0, SEEK_SET);
     }
-    H_LINE = RawLineBuffer::new(HOSTDB);
+    H_LINE = Some(RawLineBuffer::new(HOSTDB));
 }
 
 #[no_mangle]
@@ -700,7 +683,7 @@ pub unsafe extern "C" fn setnetent(stayopen: c_int) {
     } else {
        platform::lseek(NETDB, 0, SEEK_SET);
     }
-    N_LINE = RawLineBuffer::new(NETDB);
+    N_LINE = Some(RawLineBuffer::new(NETDB));
 }
 
 #[no_mangle]
@@ -711,7 +694,7 @@ pub unsafe extern "C" fn setprotoent(stayopen: c_int) {
     } else {
        platform::lseek(PROTODB, 0, SEEK_SET);
     }
-    P_LINE = RawLineBuffer::new(PROTODB);
+    P_LINE = Some(RawLineBuffer::new(PROTODB));
 }
 
 #[no_mangle]
@@ -722,7 +705,7 @@ pub unsafe extern "C" fn setservent(stayopen: c_int) {
     } else {
        platform::lseek(SERVDB, 0, SEEK_SET);
     }
-    S_LINE = RawLineBuffer::new(SERVDB);
+    S_LINE = Some(RawLineBuffer::new(SERVDB));
 }
 
 #[no_mangle]

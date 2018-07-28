@@ -10,7 +10,7 @@ extern crate platform;
 
 use alloc::vec::Vec;
 use core::ptr;
-use platform::RawFile;
+use platform::{Line, RawFile, RawLineBuffer};
 use platform::types::*;
 
 #[repr(C)]
@@ -51,54 +51,16 @@ fn pwd_lookup<F>(out: *mut passwd, alloc: Option<(*mut c_char, size_t)>, mut cal
         Err(_) => return OptionPasswd::Error
     };
 
-    let mut buf = Vec::new();
-    let mut newline = None;
+    let mut rlb = RawLineBuffer::new(*file);
 
     loop {
-        // TODO when nll becomes a thing:
-        // let mut newline;
-
-        // WORKAROUND:
-        if let Some(newline) = newline {
-            buf.drain(..newline + 1);
-        }
-
-        // Read until newline
-        loop {
-            newline = buf.iter().position(|b| *b == b'\n');
-
-            if newline.is_some() {
-                break;
-            }
-
-            let len = buf.len();
-
-            if len >= buf.capacity() {
-                buf.reserve(1024);
-            }
-
-            unsafe {
-                let capacity = buf.capacity();
-                buf.set_len(capacity);
-            }
-
-            let read = platform::read(*file, &mut buf[len..]);
-
-            unsafe {
-                buf.set_len(len + read as usize);
-            }
-
-            if read == 0 {
-                return OptionPasswd::NotFound;
-            }
-            if read < 0 {
-                return OptionPasswd::Error;
-            }
-        }
+        let line = match rlb.next() {
+            Line::Error => return OptionPasswd::Error,
+            Line::EOF => return OptionPasswd::NotFound,
+            Line::Some(line) => line
+        };
 
         // Parse into passwd
-        let newline = newline.unwrap(); // safe because it doesn't break the loop otherwise
-        let line = &buf[..newline];
         let mut parts: [&[u8]; 7] = [&[]; 7];
         for (i, part) in line.splitn(7, |b| *b == b':').enumerate() {
             parts[i] = part;

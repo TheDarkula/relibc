@@ -1,6 +1,6 @@
 #![no_std]
 #![allow(non_camel_case_types)]
-#![feature(alloc, allocator_api, const_vec_new)]
+#![feature(alloc, allocator_api, const_fn, const_vec_new)]
 #![cfg_attr(target_os = "redox", feature(thread_local))]
 
 #[cfg_attr(target_os = "redox", macro_use)]
@@ -39,6 +39,7 @@ pub mod rlb;
 pub mod types;
 
 pub use rawfile::RawFile;
+pub use rlb::{Line, RawLineBuffer};
 
 use alloc::Vec;
 use core::{fmt, ptr};

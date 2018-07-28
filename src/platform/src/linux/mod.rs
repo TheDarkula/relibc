@@ -1,5 +1,6 @@
+use alloc::string::String;
 use core::{mem, ptr};
-use alloc::String;
+use ::{Line, RawFile, RawLineBuffer};
 
 use errno;
 use types::*;
@@ -416,16 +417,18 @@ pub fn clock_gettime(clk_id: clockid_t, tp: *mut timespec) -> c_int {
 }
 
 pub fn get_dns_server() -> String {
-    use alloc::string::ToString;
-    use rlb::RawLineBuffer;
-    let mut dns_string = String::new();
-    let fd = open(b"/etc/resolv.conf\0".as_ptr() as *const i8, 0, 0);
-    let mut rlb = RawLineBuffer::new(fd);
-    for line in rlb.next() {
-        let line = String::from(line); 
-        if line.starts_with("nameserver") {
-            dns_string = line.trim_left_matches("nameserver ").to_string();
+    let fd = match RawFile::open(b"/etc/resolv.conf\0".as_ptr() as *const i8, 0, 0) {
+        Ok(fd) => fd,
+        Err(_) => return String::new() // TODO: better error handling
+    };
+
+    let mut rlb = RawLineBuffer::new(*fd);
+    while let Line::Some(line) = rlb.next() {
+        if line.starts_with(b"nameserver") {
+            return String::from_utf8(line[10..].to_vec()).unwrap_or_default();
         }
     }
-    dns_string
+
+    // TODO: better error handling
+    String::new()
 }

@@ -1,5 +1,5 @@
 use core::ops::Deref;
-use super::{open, dup, close, read, fstat, types::*};
+use super::{open, dup, close, read, types::*};
 use alloc::Vec;
 
 pub struct RawFile(c_int);
