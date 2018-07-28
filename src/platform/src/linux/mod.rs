@@ -1,4 +1,5 @@
 use core::{mem, ptr};
+use alloc::String;
 
 use errno;
 use types::*;
@@ -376,4 +377,19 @@ pub fn write(fildes: c_int, buf: &[u8]) -> ssize_t {
 
 pub fn clock_gettime(clk_id: clockid_t, tp: *mut timespec) -> c_int {
     e(unsafe { syscall!(CLOCK_GETTIME, clk_id, tp) }) as c_int
+}
+
+pub fn get_dns_server() -> String {
+    use alloc::string::ToString;
+    use rlb::RawLineBuffer;
+    let mut dns_string = String::new();
+    let fd = open(b"/etc/resolv.conf\0".as_ptr() as *const i8, 0, 0);
+    let mut rlb = RawLineBuffer::new(fd);
+    for line in rlb.next() {
+        let line = String::from(line); 
+        if line.starts_with("nameserver") {
+            dns_string = line.trim_left_matches("nameserver ").to_string();
+        }
+    }
+    dns_string
 }

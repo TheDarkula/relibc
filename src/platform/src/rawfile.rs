@@ -46,16 +46,33 @@ impl Deref for RawFile {
     }
 }
 
-pub fn file_read_all<T: AsRef<[u8]>>(path: T) -> Result<Vec<u8>, ()> {
-    let fd = RawFile::open(path.as_ref().as_ptr() as *const c_char, 0, 0)?;
+pub fn file_read_all(path: *const c_char) -> Result<Vec<u8>, ()> {
+    let file = RawFile::open(path, 0, 0o644)?;
 
-    let mut st = stat::default();
-    fstat(*fd as i32, &mut st);
-    let size = st.st_size as usize;
+    let mut buf = Vec::new();
+    let mut len = 0;
 
-    let mut buf = Vec::with_capacity(size);
-    unsafe { buf.set_len(size) };
-    read(*fd as i32, buf.as_mut_slice());
+    loop {
+        if len >= buf.capacity() {
+            buf.reserve(32);
 
-    Ok(buf)
+            unsafe {
+                let capacity = buf.capacity();
+                buf.set_len(capacity);
+            }
+        }
+
+        let read = read(*file, &mut buf[len..]);
+
+        len += read as usize;
+
+        if read == 0 {
+            unsafe { buf.set_len(len); }
+            return Ok(buf);
+        }
+        if read < 0 {
+            unsafe { buf.set_len(len); }
+            return Err(());
+        }
+    }
 }

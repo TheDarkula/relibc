@@ -43,8 +43,7 @@ impl Iterator for RawLineBuffer {
             {
                 pos += self.cur + 1;
                 let line = unsafe { str::from_utf8_unchecked(&self.buf[self.cur..pos]) };
-                let boxed_array: Box<[u8]> = Box::from(line.as_bytes());
-                let boxed_line: Box<str> = unsafe { mem::transmute(boxed_array) };
+                let boxed_line: Box<str> = Box::from(line);
                 self.cur = pos;
                 return Some(boxed_line);
             }

@@ -732,3 +732,7 @@ pub fn clock_gettime(clk_id: clockid_t, tp: *mut timespec) -> c_int {
         }
     }
 }
+
+pub fn get_dns_server() -> String {
+    String::from_utf8(file_read_all(b"/etc/net/dns\0".as_ptr() as *const c_char)) 
+}

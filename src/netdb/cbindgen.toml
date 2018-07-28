@@ -1,4 +1,4 @@
-sys_includes = []
+sys_includes = ["sys/socket.h"]
 include_guard = "_NETDB_H"
 language = "C"
 style = "Tag"
