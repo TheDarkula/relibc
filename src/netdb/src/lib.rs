@@ -106,7 +106,7 @@ pub struct addrinfo {
 
 static mut NETDB: c_int = 0;
 static mut NET_ENTRY: netent = netent {
-    n_name: 0 as *mut c_char,
+    n_name: ptr::null_mut(),
     n_aliases: 0 as *mut *mut c_char,
     n_addrtype: 0,
     n_net: 0 as u64,
@@ -180,7 +180,7 @@ static mut S_LINE: RawLineBuffer = RawLineBuffer {
 static mut SERV_STAYOPEN: c_int = 0;
 
 fn lookup_host(host: &str) -> Result<LookupHost, ()> {
-    let mut dns_string = platform::get_dns_server();
+    let dns_string = platform::get_dns_server();
 
     let dns_vec: Vec<u8> = dns_string
         .trim()
@@ -421,7 +421,7 @@ pub unsafe extern "C" fn gethostbyaddr(v: *const c_void, length: socklen_t, form
         Ok(s) => {
             _HOST_ADDR_LIST = mem::transmute::<u32, [u8;4]>(addr.s_addr);
             HOST_ADDR_LIST = [_HOST_ADDR_LIST.as_mut_ptr() as *mut c_char, ptr::null_mut()];
-            let host_name = s[0].to_vec();
+            let mut host_name = s[0].to_vec();
             HOST_ENTRY = hostent {
                 h_name: host_name.as_mut_ptr() as *mut c_char,
                 h_aliases: [ptr::null_mut();2].as_mut_ptr(), //TODO actually get aliases
@@ -449,7 +449,7 @@ pub unsafe extern "C" fn gethostbyname(name: *const c_char) -> *const hostent {
         host.next().ok_or( { platform::errno = ENOENT; return ptr::null() });
     };
 
-    let host_name: Vec<u8> = c_str(name).to_vec();
+    let mut host_name: Vec<u8> = c_str(name).to_vec();
     _HOST_ADDR_LIST = mem::transmute::<u32, [u8;4]>(host_addr.s_addr);
     HOST_ADDR_LIST = [_HOST_ADDR_LIST.as_mut_ptr() as *mut c_char, ptr::null_mut()];
     HOST_ADDR = Some(host_addr);
@@ -579,8 +579,8 @@ pub unsafe extern "C" fn getprotoent() -> *const protoent {
     }
     proto_aliases.push(vec![b'\0']);
     PROTO_ENTRY = protoent { 
-        p_name: proto_name.as_slice().as_mut_ptr() as *mut c_char,
-        p_aliases: proto_aliases.iter().map(|x| x.as_mut_ptr() as *mut i8).collect::<Vec<*mut i8>>().as_mut_ptr(),
+        p_name: proto_name.as_mut_slice().as_mut_ptr() as *mut c_char,
+        p_aliases: proto_aliases.iter_mut().map(|x| x.as_mut_ptr() as *mut i8).collect::<Vec<*mut i8>>().as_mut_ptr(),
         p_proto: PROTO_NUM.unwrap()           
     };
         PROTO_ALIASES = Some(proto_aliases);
@@ -669,7 +669,7 @@ pub unsafe extern "C" fn getservent() -> *const servent {
 
     SERV_ENTRY = servent {
         s_name: serv_name.as_mut_slice().as_mut_ptr() as *mut c_char,
-        s_aliases: serv_aliases.iter().map(|x| x.as_mut_ptr() as *mut i8).collect::<Vec<*mut c_char>>().as_mut_ptr(),
+        s_aliases: serv_aliases.iter_mut().map(|x| x.as_mut_ptr() as *mut i8).collect::<Vec<*mut c_char>>().as_mut_ptr(),
         s_port: SERV_PORT.unwrap(),
         s_proto: proto.as_mut_slice().as_mut_ptr() as *mut c_char
     };
