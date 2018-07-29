@@ -561,10 +561,10 @@ pub unsafe extern "C" fn getprotoent() -> *const protoent {
         proto_aliases.push(alias);
     }
     proto_aliases.push(vec![b'\0']);
-    PROTO_ENTRY = protoent {
+    PROTO_ENTRY = protoent { 
         p_name: proto_name.as_mut_slice().as_mut_ptr() as *mut c_char,
         p_aliases: proto_aliases.iter_mut().map(|x| x.as_mut_ptr() as *mut i8).collect::<Vec<*mut i8>>().as_mut_ptr(),
-        p_proto: PROTO_NUM.unwrap()
+        p_proto: PROTO_NUM.unwrap()           
     };
         PROTO_ALIASES = Some(proto_aliases);
         PROTO_NAME = Some(proto_name);
@@ -666,7 +666,7 @@ pub unsafe extern "C" fn getservent() -> *const servent {
 
 #[no_mangle]
 pub unsafe extern "C" fn sethostent(stayopen: c_int) {
-    //TODO stayopen
+    HOST_STAYOPEN = stayopen
     if HOSTDB == 0 {
         HOSTDB = platform::open(b"/etc/hosts\0".as_ptr() as *const c_char, O_RDONLY, 0)
     } else {
