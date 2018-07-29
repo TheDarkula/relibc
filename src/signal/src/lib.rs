@@ -3,7 +3,7 @@
 #![no_std]
 #![feature(asm, const_fn, core_intrinsics, global_asm)]
 
-#[macro_use]
+extern crate errno;
 extern crate platform;
 
 #[cfg(target_os = "linux")]
@@ -13,6 +13,11 @@ pub mod sys;
 #[cfg(target_os = "redox")]
 #[path = "redox.rs"]
 pub mod sys;
+
+pub use sys::*;
+
+use core::{mem, ptr};
+use platform::types::*;
 
 const SIG_ERR: usize = !0;
 
@@ -30,12 +35,8 @@ pub struct sigaction {
     pub sa_mask: sigset_t
 }
 
-const NSIG: usize = 64;
-
-pub use sys::*;
-
-use core::{mem, ptr};
-use platform::types::*;
+pub const NSIG: usize = 64;
+pub type sigset_t = c_ulong;
 
 #[no_mangle]
 pub extern "C" fn kill(pid: pid_t, sig: c_int) -> c_int {
@@ -65,9 +66,20 @@ pub unsafe extern "C" fn sigaction(sig: c_int, act: *const sigaction, oact: *mut
     platform::sigaction(sig, ptr, oact as *mut platform::types::sigaction)
 }
 
-// #[no_mangle]
-pub extern "C" fn sigaddset(set: *mut sigset_t, signo: c_int) -> c_int {
-    unimplemented!();
+#[no_mangle]
+pub extern "C" fn sigaddset(set: *mut sigset_t, mut signo: c_int) -> c_int {
+    if signo <= 0 || signo as usize > NSIG {
+        unsafe {
+            platform::errno = errno::EINVAL;
+        }
+        return -1;
+    }
+
+    let signo = signo as usize - 1; // 0-indexed usize, please!
+    unsafe {
+        *set |= 1 << (signo & (8 * mem::size_of::<sigset_t>() - 1));
+    }
+    0
 }
 
 // #[no_mangle]
@@ -75,15 +87,18 @@ pub extern "C" fn sigdelset(set: *mut sigset_t, signo: c_int) -> c_int {
     unimplemented!();
 }
 
-// #[no_mangle]
+#[no_mangle]
 pub extern "C" fn sigemptyset(set: *mut sigset_t) -> c_int {
-    unimplemented!();
+    unsafe {
+        *set = 0;
+    }
+    0
 }
 
 #[no_mangle]
 pub extern "C" fn sigfillset(set: *mut sigset_t) -> c_int {
-    for i in unsafe { &mut (*set) } {
-        *i = c_ulong::max_value();
+    unsafe {
+        *set = c_ulong::max_value();
     }
     0
 }
