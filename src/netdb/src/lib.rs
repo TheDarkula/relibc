@@ -666,7 +666,7 @@ pub unsafe extern "C" fn getservent() -> *const servent {
 
 #[no_mangle]
 pub unsafe extern "C" fn sethostent(stayopen: c_int) {
-    HOST_STAYOPEN = stayopen
+    HOST_STAYOPEN = stayopen;
     if HOSTDB == 0 {
         HOSTDB = platform::open(b"/etc/hosts\0".as_ptr() as *const c_char, O_RDONLY, 0)
     } else {
