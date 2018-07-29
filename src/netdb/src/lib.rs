@@ -34,7 +34,7 @@ use errno::*;
 use fcntl::O_RDONLY;
 
 use platform::types::*;
-use platform::rlb::RawLineBuffer;
+use platform::rlb::{Line, RawLineBuffer};
 use platform::{c_str, open, cstr_from_bytes_with_nul_unchecked, SEEK_SET};
 
 use dns::{Dns, DnsQuery};
@@ -114,12 +114,7 @@ static mut NET_ENTRY: netent = netent {
 static mut NET_NAME: Option<Vec<u8>> = None;
 static mut NET_ALIASES: [*const c_char; MAXALIASES] = [ptr::null(); MAXALIASES];
 static mut NET_NUM: Option<u64> = None;
-static mut N_LINE: RawLineBuffer = RawLineBuffer {
-    fd: 0,
-    cur: 0,
-    read: 0,
-    buf: [0; 8 * 1024],
-};
+static mut N_LINE: Option<RawLineBuffer> = None;
 static mut NET_STAYOPEN: c_int = 0;
 
 static mut HOSTDB: c_int = 0;
@@ -131,16 +126,11 @@ static mut HOST_ENTRY: hostent = hostent {
     h_addr_list: 0 as *mut *mut c_char,
 };
 static mut HOST_NAME: Option<Vec<u8>> = None;
-static mut HOST_ALIASES: Option<Vec<Vec<u8>>> = None; 
+static mut HOST_ALIASES: Option<Vec<Vec<u8>>> = None;
 static mut HOST_ADDR: Option<in_addr> = None;
 static mut HOST_ADDR_LIST: [*mut c_char; 2] = [ptr::null_mut(); 2];
 static mut _HOST_ADDR_LIST: [u8;4] = [0u8;4];
-static mut H_LINE: RawLineBuffer = RawLineBuffer {
-    fd: 0,
-    cur: 0,
-    read: 0,
-    buf: [0; 8 * 1024],
-};
+static mut H_LINE: Option<RawLineBuffer> = None;
 static mut HOST_STAYOPEN: c_int = 0;
 
 static mut PROTODB: c_int = 0;
@@ -152,12 +142,7 @@ static mut PROTO_ENTRY: protoent = protoent {
 static mut PROTO_NAME: Option<Vec<u8>> = None;
 static mut PROTO_ALIASES: Option<Vec<Vec<u8>>> = None;
 static mut PROTO_NUM: Option<c_int> = None;
-static mut P_LINE: RawLineBuffer = RawLineBuffer {
-    fd: 0,
-    cur: 0,
-    read: 0,
-    buf: [0; 8 * 1024],
-};
+static mut P_LINE: Option<RawLineBuffer> = None;
 static mut PROTO_STAYOPEN: c_int = 0;
 
 static mut SERVDB: c_int = 0;
@@ -171,13 +156,12 @@ static mut SERV_NAME: Option<Vec<u8>> = None;
 static mut SERV_ALIASES: Option<Vec<Vec<u8>>> = None;
 static mut SERV_PORT: Option<c_int> = None;
 static mut SERV_PROTO: Option<Vec<u8>> = None;
-static mut S_LINE: RawLineBuffer = RawLineBuffer {
-    fd: 0,
-    cur: 0,
-    read: 0,
-    buf: [0; 8 * 1024],
-};
+static mut S_LINE: Option<RawLineBuffer> = None;
 static mut SERV_STAYOPEN: c_int = 0;
+
+fn bytes_to_box_str(bytes: &[u8]) -> Box<str> {
+    Box::from(core::str::from_utf8(bytes).unwrap_or(""))
+}
 
 fn lookup_host(host: &str) -> Result<LookupHost, ()> {
     let dns_string = platform::get_dns_server();
@@ -214,19 +198,19 @@ fn lookup_host(host: &str) -> Result<LookupHost, ()> {
 
         let packet_data = packet.compile();
         let packet_data_ptr = &packet_data as *const _ as *const c_void;
-        
+
         let sock = unsafe {sys_socket::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP as i32)};
 
         let mut dest = sockaddr_in {
-            sa_family: AF_INET as u16,
-            sin_port: htons(53), 
+            sin_family: AF_INET as u16,
+            sin_port: htons(53),
             sin_addr: in_addr {
                 s_addr: unsafe { mem::transmute::<[u8;4], u32>(dns_arr) },
             },
         };
 
         let dest_ptr = &mut dest as *mut _ as *mut sockaddr;
-        
+
         unsafe {
             if sys_socket::sendto(sock, packet_data_ptr, packet_data.len(), 0, dest_ptr, 4) < 0 {
                 return Err(());
@@ -245,7 +229,7 @@ fn lookup_host(host: &str) -> Result<LookupHost, ()> {
         if count < 0 {
             return Err(())
         }
-        
+
         match Dns::parse(&buf[..count as usize]) {
             Ok(response) => {
                 let mut addrs = vec![];
@@ -312,7 +296,7 @@ fn lookup_addr(addr: in_addr) -> Result<Vec<Vec<u8>>, ()> {
             flags: 0x0100,
             queries: vec![
                 DnsQuery {
-                    name: String::from_utf8(name).unwrap(), 
+                    name: String::from_utf8(name).unwrap(),
                     q_type: 0x000C,
                     q_class: 0x0001,
                 },
@@ -322,11 +306,11 @@ fn lookup_addr(addr: in_addr) -> Result<Vec<Vec<u8>>, ()> {
 
         let packet_data = packet.compile();
         let packet_data_ptr = &packet_data as *const _ as *const c_void;
-        
+
         let sock = unsafe {sys_socket::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP as i32)};
 
         let mut dest = sockaddr_in {
-            sa_family: AF_INET as u16,
+            sin_family: AF_INET as u16,
             sin_port: 53, // may need to htons this
             sin_addr: in_addr {
                 s_addr: unsafe { mem::transmute::<[u8;4], u32>(dns_arr) },
@@ -334,7 +318,7 @@ fn lookup_addr(addr: in_addr) -> Result<Vec<Vec<u8>>, ()> {
         };
 
         let dest_ptr = &mut dest as *mut _ as *mut sockaddr;
-        
+
         unsafe {
             if sys_socket::sendto(sock, packet_data_ptr, packet_data.len(), 0, dest_ptr, 4) < 0 {
                 return Err(());
@@ -353,15 +337,15 @@ fn lookup_addr(addr: in_addr) -> Result<Vec<Vec<u8>>, ()> {
         if count < 0 {
             return Err(())
         }
-        
+
         match Dns::parse(&buf[..count as usize]) {
             Ok(response) => {
                 let mut names = vec![];
                 for answer in response.answers.iter() {
                     if answer.a_type == 0x000C && answer.a_class == 0x0001 {
                         // answer.data is encoded kinda weird.
-                        // Basically length-prefixed strings for each 
-                        // subsection of the domain. 
+                        // Basically length-prefixed strings for each
+                        // subsection of the domain.
                         // We need to parse this to insert periods where
                         // they belong (ie at the end of each string)
                         let data = parse_revdns_answer(answer.data.clone());
@@ -380,7 +364,7 @@ fn lookup_addr(addr: in_addr) -> Result<Vec<Vec<u8>>, ()> {
 fn parse_revdns_answer(data: Vec<u8>) -> Vec<u8> {
     let mut cursor = 0;
     let mut offset = 0;
-    let mut index = 0; 
+    let mut index = 0;
     let mut output = data.clone();
     while index < data.len() - 1 {
         offset = data[index] as usize;
@@ -389,8 +373,8 @@ fn parse_revdns_answer(data: Vec<u8>) -> Vec<u8> {
         cursor = index;
     }
     //we don't want an extra period at the end
-    output.pop(); 
-    output 
+    output.pop();
+    output
 }
 
 #[no_mangle]
@@ -470,29 +454,28 @@ pub unsafe extern "C" fn gethostbyname(name: *const c_char) -> *const hostent {
 pub unsafe extern "C" fn gethostent() -> *const hostent {
     if HOSTDB == 0 {
         HOSTDB = open(cstr_from_bytes_with_nul_unchecked(b"/etc/hosts\0"), O_RDONLY, 0);
-        H_LINE = RawLineBuffer::new(HOSTDB);
+        H_LINE = Some(RawLineBuffer::new(HOSTDB));
     }
 
     let mut r: Box<str> = Box::default();
     while r.is_empty() || r.split_whitespace().next() == None || r.starts_with("#") {
-        r = match H_LINE.next() {
-            Some(s) => s,
-            None => {
+        r = match H_LINE.as_mut().unwrap().next() {
+            Line::Some(s) => bytes_to_box_str(s),
+            _ => {
                 if HOST_STAYOPEN == 0 { endhostent(); }
                 return ptr::null();
             }
-            None => return ptr::null(),
         };
     }
-    
+
     let mut iter: SplitWhitespace = r.split_whitespace();
-    
+
     let mut addr_vec = iter.next().unwrap().as_bytes().to_vec();
     addr_vec.push(b'\0');
     let addr_cstr = addr_vec.as_slice().as_ptr() as *const i8;
     let mut addr = mem::uninitialized();
     inet_aton(addr_cstr, &mut addr);
-    
+
     _HOST_ADDR_LIST = mem::transmute::<u32, [u8;4]>(addr.s_addr);
     HOST_ADDR_LIST = [_HOST_ADDR_LIST.as_mut_ptr() as *mut c_char, ptr::null_mut()];
 
@@ -500,9 +483,9 @@ pub unsafe extern "C" fn gethostent() -> *const hostent {
 
     let mut host_name = iter.next().unwrap().as_bytes().to_vec();
     host_name.push(b'\0');
-    
-    let mut host_aliases: Vec<Vec<u8>> = Vec::new(); 
-    
+
+    let mut host_aliases: Vec<Vec<u8>> = Vec::new();
+
     loop {
         let mut alias = match iter.next() {
             Some(s) => s.as_bytes().to_vec(),
@@ -514,15 +497,15 @@ pub unsafe extern "C" fn gethostent() -> *const hostent {
 
     host_aliases.push(vec![b'\0']);
 
-    HOST_ENTRY = hostent { 
+    HOST_ENTRY = hostent {
         h_name: host_name.as_mut_ptr() as *mut c_char,
         h_aliases: host_aliases.as_mut_slice().as_mut_ptr() as *mut *mut i8,
-        h_addrtype: AF_INET, 
+        h_addrtype: AF_INET,
         h_length: 4,
         h_addr_list: HOST_ADDR_LIST.as_mut_ptr()
     };
         HOST_ALIASES = Some(host_aliases);
-        HOST_NAME = Some(host_name); 
+        HOST_NAME = Some(host_name);
         &HOST_ENTRY as *const hostent
 }
 
@@ -545,30 +528,30 @@ pub unsafe extern "C" fn getnetent() -> *const netent {
 pub unsafe extern "C" fn getprotoent() -> *const protoent {
     if PROTODB == 0 {
         PROTODB = open(cstr_from_bytes_with_nul_unchecked(b"/etc/protocols\0"), O_RDONLY, 0);
-        P_LINE = RawLineBuffer::new(PROTODB);
+        P_LINE = Some(RawLineBuffer::new(PROTODB));
     }
 
     let mut r: Box<str> = Box::default();
     while r.is_empty() || r.split_whitespace().next() == None || r.starts_with("#") {
-        r = match P_LINE.next() {
-            Some(s) => s,
-            None => {
-                if PROTO_STAYOPEN == 0 { endprotoent(); } 
+        r = match P_LINE.as_mut().unwrap().next() {
+            Line::Some(s) => bytes_to_box_str(s),
+            _ => {
+                if PROTO_STAYOPEN == 0 { endprotoent(); }
                 return ptr::null();
             },
         };
     }
-    
+
     let mut iter: SplitWhitespace = r.split_whitespace();
 
-    let mut proto_name: Vec<u8> = iter.next().unwrap().as_bytes().to_vec(); 
+    let mut proto_name: Vec<u8> = iter.next().unwrap().as_bytes().to_vec();
     proto_name.push(b'\0');
-    
+
     let mut num = iter.next().unwrap().as_bytes().to_vec();
     num.push(b'\0');
-    PROTO_NUM = Some(atoi(num.as_mut_slice().as_mut_ptr() as *mut i8)); 
+    PROTO_NUM = Some(atoi(num.as_mut_slice().as_mut_ptr() as *mut i8));
 
-    let mut proto_aliases: Vec<Vec<u8>> = Vec::new(); 
+    let mut proto_aliases: Vec<Vec<u8>> = Vec::new();
     loop {
         let mut alias = match iter.next() {
             Some(s) => s.as_bytes().to_vec(),
@@ -584,7 +567,7 @@ pub unsafe extern "C" fn getprotoent() -> *const protoent {
         p_proto: PROTO_NUM.unwrap()           
     };
         PROTO_ALIASES = Some(proto_aliases);
-        PROTO_NAME = Some(proto_name); 
+        PROTO_NAME = Some(proto_name);
         if PROTO_STAYOPEN == 0 { endprotoent(); }
         &PROTO_ENTRY as *const protoent
 }
@@ -592,7 +575,7 @@ pub unsafe extern "C" fn getprotoent() -> *const protoent {
 #[no_mangle]
 pub unsafe extern "C" fn getservbyname(
     name: *const c_char,
-    proto: *const c_char) 
+    proto: *const c_char)
 -> *const servent {
     let mut p: *const servent;
 
@@ -618,7 +601,7 @@ pub unsafe extern "C" fn getservbyname(
 #[no_mangle]
 pub unsafe extern "C" fn getservbyport(
     port: c_int,
-    proto: *const c_char) 
+    proto: *const c_char)
 -> *const servent {
     let mut p: *const servent;
     while { p=getservent(); p!=ptr::null()} {
@@ -634,14 +617,14 @@ pub unsafe extern "C" fn getservbyport(
 pub unsafe extern "C" fn getservent() -> *const servent {
     if SERVDB == 0 {
         SERVDB = platform::open(b"/etc/services".as_ptr() as *const c_char, O_RDONLY, 0);
-        S_LINE = RawLineBuffer::new(SERVDB);
+        S_LINE = Some(RawLineBuffer::new(SERVDB));
     }
 
     let mut r: Box<str> = Box::default();
     while r.is_empty() || r.split_whitespace().next() == None || r.starts_with("#") {
-        r = match S_LINE.next() {
-            Some(s) => s,
-            None => {
+        r = match S_LINE.as_mut().unwrap().next() {
+            Line::Some(s) => bytes_to_box_str(s),
+            _ => {
                 if SERV_STAYOPEN == 0 { endservent(); }
                 return ptr::null();
             }
@@ -655,7 +638,7 @@ pub unsafe extern "C" fn getservent() -> *const servent {
     let port = atoi(split.next().unwrap().as_ptr() as *const c_char);
     SERV_PORT = Some(port);
     let mut proto = split.next().unwrap().as_bytes().to_vec();
-    
+
     let mut serv_aliases: Vec<Vec<u8>> = Vec::new();
     loop {
         let mut alias = match iter.next() {
@@ -683,13 +666,13 @@ pub unsafe extern "C" fn getservent() -> *const servent {
 
 #[no_mangle]
 pub unsafe extern "C" fn sethostent(stayopen: c_int) {
-    //TODO stayopen
+    HOST_STAYOPEN = stayopen
     if HOSTDB == 0 {
         HOSTDB = platform::open(b"/etc/hosts\0".as_ptr() as *const c_char, O_RDONLY, 0)
     } else {
        platform::lseek(HOSTDB, 0, SEEK_SET);
     }
-    H_LINE = RawLineBuffer::new(HOSTDB);
+    H_LINE = Some(RawLineBuffer::new(HOSTDB));
 }
 
 #[no_mangle]
@@ -700,7 +683,7 @@ pub unsafe extern "C" fn setnetent(stayopen: c_int) {
     } else {
        platform::lseek(NETDB, 0, SEEK_SET);
     }
-    N_LINE = RawLineBuffer::new(NETDB);
+    N_LINE = Some(RawLineBuffer::new(NETDB));
 }
 
 #[no_mangle]
@@ -711,7 +694,7 @@ pub unsafe extern "C" fn setprotoent(stayopen: c_int) {
     } else {
        platform::lseek(PROTODB, 0, SEEK_SET);
     }
-    P_LINE = RawLineBuffer::new(PROTODB);
+    P_LINE = Some(RawLineBuffer::new(PROTODB));
 }
 
 #[no_mangle]
@@ -722,13 +705,13 @@ pub unsafe extern "C" fn setservent(stayopen: c_int) {
     } else {
        platform::lseek(SERVDB, 0, SEEK_SET);
     }
-    S_LINE = RawLineBuffer::new(SERVDB);
+    S_LINE = Some(RawLineBuffer::new(SERVDB));
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn getaddrinfo(
-    node: *const c_char, 
-    service: *const c_char, 
+    node: *const c_char,
+    service: *const c_char,
     hints: *const addrinfo,
     res: *mut *mut addrinfo)
 -> c_int {
@@ -743,7 +726,7 @@ pub unsafe extern "C" fn getnameinfo(
     hostlen: socklen_t,
     serv: *mut c_char,
     servlen: socklen_t,
-    flags: c_int) 
+    flags: c_int)
 -> c_int {
     unimplemented!();
 }

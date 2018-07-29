@@ -24,13 +24,6 @@ extern "C" fn sig_handler(sig: usize) {
     }
 }
 
-#[repr(C)]
-struct SockData {
-    port: in_port_t,
-    addr: in_addr_t,
-    _pad: [c_char; 8],
-}
-
 fn e(sys: Result<usize>) -> usize {
     match sys {
         Ok(ok) => ok,
@@ -59,9 +52,9 @@ macro_rules! bind_or_connect {
             errno = syscall::EINVAL;
             return -1;
         }
-        let data: &SockData = mem::transmute(&(*$address).data);
-        let addr = &data.addr;
-        let port = in_port_t::from_be(data.port); // This is transmuted from bytes in BigEndian order
+        let data = &*($address as *const sockaddr_in);
+        let addr = &data.sin_addr.s_addr;
+        let port = in_port_t::from_be(data.sin_port); // This is transmuted from bytes in BigEndian order
         let path = format!(bind_or_connect!($mode "{}.{}.{}.{}:{}"), addr[0], addr[1], addr[2], addr[3], port);
 
         // Duplicate the socket, and then duplicate the copy back to the original fd
@@ -110,7 +103,7 @@ pub fn chmod(path: *const c_char, mode: mode_t) -> c_int {
     match syscall::open(path, O_WRONLY) {
         Err(err) => e(Err(err)) as c_int,
         Ok(fd) => {
-            let res = syscall::fchmod(fd as usize, mode);
+            let res = syscall::fchmod(fd as usize, mode as u16);
             let _ = syscall::close(fd);
             e(res) as c_int
         }
@@ -173,12 +166,12 @@ pub unsafe extern "C" fn execve(
                         // If the environment variable has no value, there
                         // is no need to write anything to the env scheme.
                         if sep + 1 < slice.len() {
-                            let n = match syscall::write(fd, &slice[sep + 1..]) {
-                                Ok(n) => n,
+                            match syscall::write(fd, &slice[sep + 1..]) {
+                                Ok(_) => (),
                                 err => {
                                     return e(err) as c_int;
                                 }
-                            };
+                            }
                         }
                         // Cleanup after adding the variable.
                         match syscall::close(fd) {
@@ -225,7 +218,7 @@ pub fn fchdir(fd: c_int) -> c_int {
 }
 
 pub fn fchmod(fd: c_int, mode: mode_t) -> c_int {
-    e(syscall::fchmod(fd as usize, mode)) as c_int
+    e(syscall::fchmod(fd as usize, mode as u16)) as c_int
 }
 
 pub fn fchown(fd: c_int, owner: uid_t, group: gid_t) -> c_int {
@@ -249,16 +242,25 @@ pub fn fstat(fildes: c_int, buf: *mut stat) -> c_int {
                     (*buf).st_dev = redox_buf.st_dev as dev_t;
                     (*buf).st_ino = redox_buf.st_ino as ino_t;
                     (*buf).st_nlink = redox_buf.st_nlink as nlink_t;
-                    (*buf).st_mode = redox_buf.st_mode;
+                    (*buf).st_mode = redox_buf.st_mode as mode_t;
                     (*buf).st_uid = redox_buf.st_uid as uid_t;
                     (*buf).st_gid = redox_buf.st_gid as gid_t;
                     // TODO st_rdev
                     (*buf).st_rdev = 0;
                     (*buf).st_size = redox_buf.st_size as off_t;
                     (*buf).st_blksize = redox_buf.st_blksize as blksize_t;
-                    (*buf).st_atim = redox_buf.st_atime as time_t;
-                    (*buf).st_mtim = redox_buf.st_mtime as time_t;
-                    (*buf).st_ctim = redox_buf.st_ctime as time_t;
+                    (*buf).st_atim = timespec {
+                        tv_sec: redox_buf.st_atime as time_t,
+                        tv_nsec: 0
+                    };
+                    (*buf).st_mtim = timespec {
+                        tv_sec: redox_buf.st_mtime as time_t,
+                        tv_nsec: 0
+                    };
+                    (*buf).st_ctim = timespec {
+                        tv_sec: redox_buf.st_ctime as time_t,
+                        tv_nsec: 0
+                    };
                 }
             }
             0
@@ -275,12 +277,68 @@ pub fn ftruncate(fd: c_int, len: off_t) -> c_int {
     e(syscall::ftruncate(fd as usize, len as usize)) as c_int
 }
 
+pub fn futimens(fd: c_int, times: *const timespec) -> c_int {
+    let times = [
+        unsafe { redox_timespec::from(&*times) },
+        unsafe { redox_timespec::from(&*times.offset(1)) }
+    ];
+    e(syscall::futimens(fd as usize, &times)) as c_int
+}
+
 pub fn getcwd(buf: *mut c_char, size: size_t) -> *mut c_char {
     let buf_slice = unsafe { slice::from_raw_parts_mut(buf as *mut u8, size as usize) };
     if e(syscall::getcwd(buf_slice)) == !0 {
         ptr::null_mut()
     } else {
         buf
+    }
+}
+
+pub fn getdents(fd: c_int, mut dirents: *mut dirent, mut bytes: usize) -> c_int {
+    let mut amount = 0;
+
+    let mut buf = [0; 1024];
+    let mut bindex = 0;
+    let mut blen = 0;
+
+    let mut name = [0; 256];
+    let mut nindex = 0;
+
+    loop {
+        if bindex >= blen {
+            bindex = 0;
+            blen = match syscall::read(fd as usize, &mut buf) {
+                Ok(0) => return amount,
+                Ok(n) => n,
+                Err(err) => return -err.errno
+            };
+        }
+
+        if buf[bindex] == b'\n' {
+            // Put a NUL byte either at the end, or if it's too big, at where it's truncated.
+            name[nindex.min(name.len() - 1)] = 0;
+            unsafe {
+                *dirents = dirent {
+                    d_ino: 0,
+                    d_off: 0,
+                    d_reclen: mem::size_of::<dirent>() as c_ushort,
+                    d_type: 0,
+                    d_name: name
+                };
+                dirents = dirents.offset(1);
+            }
+            amount += 1;
+            if bytes <= mem::size_of::<dirent>() {
+                return amount;
+            }
+            bytes -= mem::size_of::<dirent>();
+        } else {
+            if nindex < name.len() {
+                name[nindex] = buf[bindex] as c_char;
+            }
+            nindex += 1;
+            bindex += 1;
+        }
     }
 }
 
@@ -294,6 +352,16 @@ pub fn geteuid() -> uid_t {
 
 pub fn getgid() -> gid_t {
     e(syscall::getgid()) as gid_t
+}
+
+pub fn getrusage(who: c_int, r_usage: *mut rusage) -> c_int {
+    let _ = write!(
+        ::FileWriter(2),
+        "unimplemented: getrusage({}, {:p})",
+        who,
+        r_usage
+    );
+    -1
 }
 
 pub unsafe fn gethostname(mut name: *mut c_char, len: size_t) -> c_int {
@@ -346,6 +414,20 @@ unsafe fn inner_get_name(
     Ok(0)
 }
 
+pub fn getitimer(which: c_int, out: *mut itimerval) -> c_int {
+    let _ = write!(
+        ::FileWriter(2),
+        "unimplemented: getitimer({}, {:p})",
+        which,
+        out
+    );
+
+    unsafe {
+        *out = itimerval::default();
+    }
+    0
+}
+
 pub unsafe fn getpeername(
     socket: c_int,
     address: *mut sockaddr,
@@ -393,16 +475,43 @@ pub fn getsockopt(
     -1
 }
 
+pub fn gettimeofday(tp: *mut timeval, tzp: *mut timezone) -> c_int {
+    let mut redox_tp = redox_timespec::default();
+    let err = e(syscall::clock_gettime(syscall::CLOCK_REALTIME, &mut redox_tp)) as c_int;
+    if err < 0 {
+        return err;
+    }
+    unsafe {
+        (*tp).tv_sec = redox_tp.tv_sec as time_t;
+        (*tp).tv_usec = (redox_tp.tv_nsec / 1000) as suseconds_t;
+
+        if !tzp.is_null() {
+            (*tzp).tz_minuteswest = 0;
+            (*tzp).tz_dsttime = 0;
+        }
+    }
+    0
+}
+
 pub fn getuid() -> uid_t {
     e(syscall::getuid()) as pid_t
 }
 
+pub fn isatty(fd: c_int) -> c_int {
+    syscall::dup(fd as usize, b"termios")
+        .map(|fd| {
+            let _ = syscall::close(fd);
+            1
+        })
+        .unwrap_or(0)
+}
+
 pub fn kill(pid: pid_t, sig: c_int) -> c_int {
-    e(syscall::kill(pid, sig as usize)) as c_int
+    e(syscall::kill(pid as usize, sig as usize)) as c_int
 }
 
 pub fn killpg(pgrp: pid_t, sig: c_int) -> c_int {
-    e(syscall::kill(-(pgrp as isize) as pid_t, sig as usize)) as c_int
+    e(syscall::kill(-(pgrp as isize) as usize, sig as usize)) as c_int
 }
 
 pub fn link(path1: *const c_char, path2: *const c_char) -> c_int {
@@ -411,7 +520,7 @@ pub fn link(path1: *const c_char, path2: *const c_char) -> c_int {
     e(unsafe { syscall::link(path1.as_ptr(), path2.as_ptr()) }) as c_int
 }
 
-pub fn listen(socket: c_int, backlog: c_int) -> c_int {
+pub fn listen(_socket: c_int, _backlog: c_int) -> c_int {
     // TODO
     0
 }
@@ -558,6 +667,21 @@ pub unsafe fn sendto(
         return -1;
     }
     write(socket, slice::from_raw_parts(buf as *const u8, len))
+}
+
+pub fn setitimer(which: c_int, new: *const itimerval, old: *mut itimerval) -> c_int {
+    let _ = write!(
+        ::FileWriter(2),
+        "unimplemented: setitimer({}, {:p}, {:p})",
+        which,
+        new,
+        old
+    );
+
+    unsafe {
+        *old = itimerval::default();
+    }
+    0
 }
 
 pub fn setpgid(pid: pid_t, pgid: pid_t) -> c_int {
@@ -712,7 +836,7 @@ pub fn waitpid(pid: pid_t, stat_loc: *mut c_int, options: c_int) -> pid_t {
         if !stat_loc.is_null() {
             *stat_loc = temp as c_int;
         }
-        res
+        res as pid_t
     }
 }
 

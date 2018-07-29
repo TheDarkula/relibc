@@ -50,31 +50,51 @@ pub type wchar_t = i32;
 pub type wint_t = u32;
 pub type wctype_t = i64;
 
-pub type off_t = i64;
-pub type mode_t = u16;
-pub type time_t = i64;
-pub type pid_t = usize;
-pub type id_t = usize;
-pub type gid_t = usize;
-pub type uid_t = usize;
-pub type dev_t = usize;
-pub type ino_t = usize;
-pub type nlink_t = usize;
-pub type blksize_t = isize;
-pub type blkcnt_t = u64;
+pub type off_t = c_long;
+pub type mode_t = c_int;
+pub type time_t = c_long;
+pub type pid_t = c_int;
+pub type id_t = c_uint;
+pub type gid_t = c_int;
+pub type uid_t = c_int;
+pub type dev_t = c_long;
+pub type ino_t = c_ulong;
+pub type nlink_t = c_ulong;
+pub type blksize_t = c_long;
+pub type blkcnt_t = c_ulong;
 
 pub type useconds_t = c_uint;
 pub type suseconds_t = c_int;
 
-pub type clock_t = i64;
-pub type clockid_t = i32;
-pub type timer_t = c_void;
+pub type clock_t = c_long;
+pub type clockid_t = c_int;
+pub type timer_t = *mut c_void;
 
 #[repr(C)]
 #[derive(Default)]
 pub struct timespec {
     pub tv_sec: time_t,
     pub tv_nsec: c_long,
+}
+
+#[repr(C)]
+#[derive(Default)]
+pub struct timeval {
+    pub tv_sec: time_t,
+    pub tv_usec: suseconds_t,
+}
+#[repr(C)]
+#[derive(Default)]
+pub struct timezone {
+    pub tz_minuteswest: c_int,
+    pub tz_dsttime: c_int,
+}
+
+#[repr(C)]
+#[derive(Default)]
+pub struct itimerval {
+    pub it_interval: timeval,
+    pub it_value: timeval,
 }
 
 #[cfg(target_os = "redox")]
@@ -88,6 +108,7 @@ impl<'a> From<&'a timespec> for redox_timespec {
 }
 
 #[repr(C)]
+#[derive(Default)]
 pub struct stat {
     pub st_dev: dev_t,
     pub st_ino: ino_t,
@@ -100,39 +121,15 @@ pub struct stat {
     pub st_blksize: blksize_t,
     pub st_blocks: blkcnt_t,
 
-    pub st_atim: time_t,
-    pub st_mtim: time_t,
-    pub st_ctim: time_t,
+    pub st_atim: timespec,
+    pub st_mtim: timespec,
+    pub st_ctim: timespec,
 
-    // Compared to glibc, our struct is for some reason 48 bytes too small.
+    // Compared to glibc, our struct is for some reason 24 bytes too small.
     // Accessing atime works, so clearly the struct isn't incorrect...
     // This works.
-    pub _pad: [u8; 48],
+    pub _pad: [c_char; 24]
 }
-
-impl Default for stat {
-    fn default() -> stat { 
-        stat {
-            st_dev: 0,
-            st_ino: 0,
-            st_nlink: 0,
-            st_mode: 0,
-            st_uid: 0,
-            st_gid: 0,
-            st_rdev: 0,
-            st_size: 0,
-            st_blksize: 0,
-            st_blocks: 0,
-
-            st_atim: 0,
-            st_mtim: 0,
-            st_ctim: 0,
-
-            _pad: [0u8; 48],
-        }
-    }
-}
-
 
 pub const AF_INET: c_int = 2;
 pub const SOCK_STREAM: c_int = 1;
@@ -153,6 +150,19 @@ pub type socklen_t = u32;
 pub struct sockaddr {
     pub sa_family: sa_family_t,
     pub data: [c_char; 14],
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct in_addr {
+    pub s_addr: in_addr_t
+}
+
+#[repr(C)]
+pub struct sockaddr_in {
+    pub sin_family: sa_family_t,
+    pub sin_port: in_port_t,
+    pub sin_addr: in_addr
 }
 
 #[repr(C)]
@@ -177,4 +187,42 @@ pub struct utsname {
     pub version: [c_char; UTSLENGTH],
     pub machine: [c_char; UTSLENGTH],
     pub domainname: [c_char; UTSLENGTH],
+}
+
+#[repr(C)]
+pub struct dirent {
+    pub d_ino: ino_t,
+    pub d_off: off_t,
+    pub d_reclen: c_ushort,
+    pub d_type: c_uchar,
+    pub d_name: [c_char; 256]
+}
+
+#[repr(C)]
+#[derive(Default)]
+pub struct winsize {
+    ws_row: c_ushort,
+    ws_col: c_ushort,
+    ws_xpixel: c_ushort,
+    ws_ypixel: c_ushort
+}
+
+#[repr(C)]
+pub struct rusage {
+    pub ru_utime: timeval,
+    pub ru_stime: timeval,
+    pub ru_maxrss: c_long,
+    pub ru_ixrss: c_long,
+    pub ru_idrss: c_long,
+    pub ru_isrss: c_long,
+    pub ru_minflt: c_long,
+    pub ru_majflt: c_long,
+    pub ru_nswap: c_long,
+    pub ru_inblock: c_long,
+    pub ru_oublock: c_long,
+    pub ru_msgsnd: c_long,
+    pub ru_msgrcv: c_long,
+    pub ru_nsignals: c_long,
+    pub ru_nvcsw: c_long,
+    pub ru_nivcsw: c_long
 }

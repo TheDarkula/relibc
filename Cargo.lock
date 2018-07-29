@@ -80,6 +80,7 @@ name = "crt0"
 version = "0.1.0"
 dependencies = [
  "platform 0.1.0",
+ "stdio 0.1.0",
 ]
 
 [[package]]
@@ -88,6 +89,18 @@ version = "0.1.0"
 dependencies = [
  "cbindgen 0.5.2",
  "platform 0.1.0",
+]
+
+[[package]]
+name = "dirent"
+version = "0.1.0"
+dependencies = [
+ "cbindgen 0.5.2",
+ "errno 0.1.0",
+ "fcntl 0.1.0",
+ "platform 0.1.0",
+ "stdio 0.1.0",
+ "unistd 0.1.0",
 ]
 
 [[package]]
@@ -253,6 +266,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "pwd"
+version = "0.1.0"
+dependencies = [
+ "cbindgen 0.5.2",
+ "errno 0.1.0",
+ "fcntl 0.1.0",
+ "platform 0.1.0",
+]
+
+[[package]]
 name = "quote"
 version = "0.3.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -317,6 +340,7 @@ dependencies = [
  "cc 1.0.18 (registry+https://github.com/rust-lang/crates.io-index)",
  "compiler_builtins 0.1.0 (git+https://github.com/rust-lang-nursery/compiler-builtins.git)",
  "ctype 0.1.0",
+ "dirent 0.1.0",
  "errno 0.1.0",
  "fcntl 0.1.0",
  "fenv 0.1.0",
@@ -327,6 +351,7 @@ dependencies = [
  "netdb 0.1.0",
  "netinet 0.1.0",
  "platform 0.1.0",
+ "pwd 0.1.0",
  "semaphore 0.1.0",
  "setjmp 0.1.0",
  "signal 0.1.0",
@@ -334,11 +359,13 @@ dependencies = [
  "stdlib 0.1.0",
  "string 0.1.0",
  "strings 0.1.0",
+ "sys_ioctl 0.1.0",
  "sys_mman 0.1.0",
  "sys_resource 0.1.0",
  "sys_socket 0.1.0",
  "sys_stat 0.1.0",
  "sys_time 0.1.0",
+ "sys_un 0.1.0",
  "sys_utsname 0.1.0",
  "sys_wait 0.1.0",
  "time 0.1.0",
@@ -510,6 +537,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "sys_ioctl"
+version = "0.1.0"
+dependencies = [
+ "cbindgen 0.5.2",
+ "platform 0.1.0",
+]
+
+[[package]]
 name = "sys_mman"
 version = "0.1.0"
 dependencies = [
@@ -548,6 +583,15 @@ version = "0.1.0"
 dependencies = [
  "cbindgen 0.5.2",
  "platform 0.1.0",
+]
+
+[[package]]
+name = "sys_un"
+version = "0.1.0"
+dependencies = [
+ "cbindgen 0.5.2",
+ "platform 0.1.0",
+ "sys_socket 0.1.0",
 ]
 
 [[package]]
@@ -640,7 +684,7 @@ dependencies = [
  "platform 0.1.0",
  "stdio 0.1.0",
  "string 0.1.0",
- "sys_utsname 0.1.0",
+ "sys_time 0.1.0",
 ]
 
 [[package]]

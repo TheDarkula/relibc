@@ -1,84 +1,75 @@
-use alloc::boxed::Box;
+use alloc::vec::Vec;
 use core::{mem, ptr, str};
-use ::read;
+use read;
+use types::*;
 
 /// Implements an `Iterator` which returns on either newline or EOF.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct RawLineBuffer {
-    pub fd: i32,
-    pub cur: usize,
-    pub read: usize,
-    pub buf: [u8; 8 * 1024],
+    pub fd: c_int,
+    pub buf: Vec<u8>,
+    pub newline: Option<usize>
 }
 
-impl Default for RawLineBuffer {
-    fn default() -> RawLineBuffer {
-        RawLineBuffer {
-            fd: 0,
-            cur: 0,
-            read: 0,
-            buf: unsafe { mem::uninitialized() },
-        }
-    }
+pub enum Line<'a> {
+    Error,
+    EOF,
+    Some(&'a [u8])
 }
 
 impl RawLineBuffer {
-    pub fn new(fd: i32) -> RawLineBuffer {
-        RawLineBuffer {
+    pub const fn new(fd: c_int) -> Self {
+        Self {
             fd: fd,
-            cur: 0,
-            read: 0,
-            buf: unsafe { mem::uninitialized() },
+            buf: Vec::new(),
+            newline: None
         }
     }
-}
 
-impl Iterator for RawLineBuffer {
-    type Item = Box<str>;
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.cur != 0 && self.read != 0 {
-            if let Some(mut pos) = self.buf[self.cur..self.read]
-                .iter()
-                .position(|&x| x == b'\n')
-            {
-                pos += self.cur + 1;
-                let line = unsafe { str::from_utf8_unchecked(&self.buf[self.cur..pos]) };
-                let boxed_line: Box<str> = Box::from(line);
-                self.cur = pos;
-                return Some(boxed_line);
-            }
-
-            let mut temp: [u8; 8 * 1024] = unsafe { mem::uninitialized() };
-            unsafe {
-                ptr::copy(self.buf[self.cur..].as_ptr(), temp.as_mut_ptr(), self.read);
-                ptr::swap(self.buf.as_mut_ptr(), temp.as_mut_ptr());
-            };
-
-            self.read -= self.cur;
-            self.cur = 0;
+    // Can't use iterators because we want to return a reference.
+    // See https://stackoverflow.com/a/30422716/5069285
+    pub fn next(&mut self) -> Line {
+        // Remove last line
+        if let Some(newline) = self.newline {
+            self.buf.drain(..newline + 1);
         }
 
-        let bytes_read = {
-            let buf = &mut self.buf[self.cur..];
-            read(self.fd, buf) as usize
-        };
+        loop {
+            // Exit if newline was read already
+            self.newline = self.buf.iter().position(|b| *b == b'\n');
 
-        let end = match bytes_read {
-            0 => return None,
-            read => {
-                self.read += read;
-                self.buf[..self.read]
-                    .iter()
-                    .position(|&x| x == b'\n')
-                    .unwrap_or(0)
+            if self.newline.is_some() {
+                break;
             }
-        };
 
-        self.cur = end;
-        let line = unsafe { str::from_utf8_unchecked(&self.buf[..end]) };
-        let boxed_array: Box<[u8]> = Box::from(line.as_bytes());
-        let boxed_line: Box<str> = unsafe { mem::transmute(boxed_array) };
+            let len = self.buf.len();
 
-        Some(boxed_line)
+            if len >= self.buf.capacity() {
+                self.buf.reserve(1024);
+            }
+
+            // Create buffer of what's left in the vector, uninitialized memory
+            unsafe {
+                let capacity = self.buf.capacity();
+                self.buf.set_len(capacity);
+            }
+
+            let read = read(self.fd, &mut self.buf[len..]);
+
+            // Remove all uninitialized memory that wasn't read
+            unsafe {
+                self.buf.set_len(len + read as usize);
+            }
+
+            if read == 0 {
+                return Line::EOF;
+            }
+            if read < 0 {
+                return Line::Error;
+            }
+        }
+
+        let newline = self.newline.unwrap(); // safe because it doesn't break the loop otherwise
+        Line::Some(&self.buf[..newline])
     }
 }

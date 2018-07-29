@@ -1,6 +1,6 @@
 #![no_std]
 #![allow(non_camel_case_types)]
-#![feature(alloc, allocator_api, const_vec_new)]
+#![feature(alloc, allocator_api, const_fn, const_vec_new)]
 #![cfg_attr(target_os = "redox", feature(thread_local))]
 
 #[cfg_attr(target_os = "redox", macro_use)]
@@ -38,6 +38,9 @@ pub mod rlb;
 
 pub mod types;
 
+pub use rawfile::RawFile;
+pub use rlb::{Line, RawLineBuffer};
+
 use alloc::Vec;
 use core::{fmt, ptr};
 
@@ -64,6 +67,7 @@ pub unsafe fn c_str_mut<'a>(s: *mut c_char) -> &'a mut [u8] {
 }
 
 pub unsafe fn c_str_n_mut<'a>(s: *mut c_char, n: usize) -> &'a mut [u8] {
+    assert!(s != ptr::null_mut());
     use core::slice;
 
     let mut size = 0;
@@ -84,6 +88,7 @@ pub unsafe fn c_str<'a>(s: *const c_char) -> &'a [u8] {
 }
 
 pub unsafe fn c_str_n<'a>(s: *const c_char, n: usize) -> &'a [u8] {
+    assert!(s != ptr::null());
     use core::slice;
 
     let mut size = 0;

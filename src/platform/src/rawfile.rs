@@ -1,5 +1,5 @@
 use core::ops::Deref;
-use super::{open, dup, close, read, fstat, types::*};
+use super::{open, dup, close, read, types::*};
 use alloc::Vec;
 
 pub struct RawFile(c_int);
@@ -12,7 +12,7 @@ impl RawFile {
         }
     }
 
-    pub fn dup(&self, _buf: &[u8]) -> Result<RawFile, ()> {
+    pub fn dup(&self) -> Result<RawFile, ()> {
         match dup(self.0) {
             -1 => Err(()),
             n => Ok(RawFile(n))
