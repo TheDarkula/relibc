@@ -106,7 +106,7 @@ pub struct addrinfo {
 
 static mut NETDB: c_int = 0;
 static mut NET_ENTRY: netent = netent {
-    n_name: 0 as *mut c_char,
+    n_name: ptr::null_mut(),
     n_aliases: 0 as *mut *mut c_char,
     n_addrtype: 0,
     n_net: 0 as u64,
@@ -164,7 +164,7 @@ fn bytes_to_box_str(bytes: &[u8]) -> Box<str> {
 }
 
 fn lookup_host(host: &str) -> Result<LookupHost, ()> {
-    let mut dns_string = platform::get_dns_server();
+    let dns_string = platform::get_dns_server();
 
     let dns_vec: Vec<u8> = dns_string
         .trim()
