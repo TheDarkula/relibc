@@ -107,9 +107,9 @@ pub struct addrinfo {
 static mut NETDB: c_int = 0;
 static mut NET_ENTRY: netent = netent {
     n_name: ptr::null_mut(),
-    n_aliases: 0 as *mut *mut c_char,
+    n_aliases: ptr::null_mut(),
     n_addrtype: 0,
-    n_net: 0 as u64,
+    n_net: 0,
 };
 static mut NET_NAME: Option<Vec<u8>> = None;
 static mut NET_ALIASES: [*const c_char; MAXALIASES] = [ptr::null(); MAXALIASES];
@@ -119,11 +119,11 @@ static mut NET_STAYOPEN: c_int = 0;
 
 static mut HOSTDB: c_int = 0;
 static mut HOST_ENTRY: hostent = hostent {
-    h_name: 0 as *mut c_char,
-    h_aliases: 0 as *mut *mut c_char,
+    h_name: ptr::null_mut(),
+    h_aliases: ptr::null_mut(), 
     h_addrtype: 0,
     h_length: 0,
-    h_addr_list: 0 as *mut *mut c_char,
+    h_addr_list: ptr::null_mut(), 
 };
 static mut HOST_NAME: Option<Vec<u8>> = None;
 static mut HOST_ALIASES: Option<Vec<Vec<u8>>> = None;
@@ -135,8 +135,8 @@ static mut HOST_STAYOPEN: c_int = 0;
 
 static mut PROTODB: c_int = 0;
 static mut PROTO_ENTRY: protoent = protoent {
-    p_name: 0 as *mut c_char,
-    p_aliases: 0 as *mut *mut c_char,
+    p_name: ptr::null_mut(),
+    p_aliases: ptr::null_mut(),
     p_proto: 0 as c_int,
 };
 static mut PROTO_NAME: Option<Vec<u8>> = None;
@@ -147,10 +147,10 @@ static mut PROTO_STAYOPEN: c_int = 0;
 
 static mut SERVDB: c_int = 0;
 static mut SERV_ENTRY: servent = servent {
-    s_name: 0 as *mut c_char,
-    s_aliases: 0 as *mut *mut c_char,
+    s_name: ptr::null_mut(),
+    s_aliases: ptr::null_mut(),
     s_port: 0 as c_int,
-    s_proto: 0 as *mut c_char,
+    s_proto: ptr::null_mut(),
 };
 static mut SERV_NAME: Option<Vec<u8>> = None;
 static mut SERV_ALIASES: Option<Vec<Vec<u8>>> = None;
@@ -406,14 +406,14 @@ pub unsafe extern "C" fn gethostbyaddr(v: *const c_void, length: socklen_t, form
             _HOST_ADDR_LIST = mem::transmute::<u32, [u8;4]>(addr.s_addr);
             HOST_ADDR_LIST = [_HOST_ADDR_LIST.as_mut_ptr() as *mut c_char, ptr::null_mut()];
             let mut host_name = s[0].to_vec();
+            HOST_NAME = Some(host_name);
             HOST_ENTRY = hostent {
-                h_name: host_name.as_mut_ptr() as *mut c_char,
+                h_name: HOST_NAME.unwrap().as_mut_ptr() as *mut c_char,
                 h_aliases: [ptr::null_mut();2].as_mut_ptr(), //TODO actually get aliases
                 h_addrtype: format,
                 h_length: length as i32,
                 h_addr_list: HOST_ADDR_LIST.as_mut_ptr()
             };
-            HOST_NAME = Some(host_name);
             &HOST_ENTRY
         }
         Err(()) => ptr::null()
@@ -434,19 +434,18 @@ pub unsafe extern "C" fn gethostbyname(name: *const c_char) -> *const hostent {
     };
 
     let mut host_name: Vec<u8> = c_str(name).to_vec();
+    HOST_NAME = Some(host_name);
     _HOST_ADDR_LIST = mem::transmute::<u32, [u8;4]>(host_addr.s_addr);
     HOST_ADDR_LIST = [_HOST_ADDR_LIST.as_mut_ptr() as *mut c_char, ptr::null_mut()];
     HOST_ADDR = Some(host_addr);
 
     HOST_ENTRY = hostent {
-        h_name: host_name.as_mut_ptr() as *mut c_char,
+        h_name: HOST_NAME.unwrap().as_mut_ptr() as *mut c_char,
         h_aliases: [ptr::null_mut();2].as_mut_ptr(),
         h_addrtype: AF_INET,
         h_length: 4,
         h_addr_list: HOST_ADDR_LIST.as_mut_ptr()
     };
-
-    HOST_NAME = Some(host_name);
     &HOST_ENTRY as *const hostent
 }
 
@@ -497,15 +496,16 @@ pub unsafe extern "C" fn gethostent() -> *const hostent {
 
     host_aliases.push(vec![b'\0']);
 
+    HOST_NAME = Some(host_name);
+    HOST_ALIASES = Some(host_aliases);
+
     HOST_ENTRY = hostent {
-        h_name: host_name.as_mut_ptr() as *mut c_char,
-        h_aliases: host_aliases.as_mut_slice().as_mut_ptr() as *mut *mut i8,
+        h_name: HOST_NAME.unwrap().as_mut_ptr() as *mut c_char,
+        h_aliases: HOST_ALIASES.unwrap().as_mut_slice().as_mut_ptr() as *mut *mut i8,
         h_addrtype: AF_INET,
         h_length: 4,
         h_addr_list: HOST_ADDR_LIST.as_mut_ptr()
     };
-        HOST_ALIASES = Some(host_aliases);
-        HOST_NAME = Some(host_name);
         &HOST_ENTRY as *const hostent
 }
 
@@ -561,13 +561,16 @@ pub unsafe extern "C" fn getprotoent() -> *const protoent {
         proto_aliases.push(alias);
     }
     proto_aliases.push(vec![b'\0']);
+
+    PROTO_ALIASES = Some(proto_aliases);
+    PROTO_NAME = Some(proto_name);
+
+
     PROTO_ENTRY = protoent { 
-        p_name: proto_name.as_mut_slice().as_mut_ptr() as *mut c_char,
-        p_aliases: proto_aliases.iter_mut().map(|x| x.as_mut_ptr() as *mut i8).collect::<Vec<*mut i8>>().as_mut_ptr(),
+        p_name: PROTO_NAME.unwrap().as_mut_slice().as_mut_ptr() as *mut c_char,
+        p_aliases: PROTO_ALIASES.unwrap().iter_mut().map(|x| x.as_mut_ptr() as *mut i8).collect::<Vec<*mut i8>>().as_mut_ptr(),
         p_proto: PROTO_NUM.unwrap()           
     };
-        PROTO_ALIASES = Some(proto_aliases);
-        PROTO_NAME = Some(proto_name);
         if PROTO_STAYOPEN == 0 { endprotoent(); }
         &PROTO_ENTRY as *const protoent
 }
@@ -650,16 +653,17 @@ pub unsafe extern "C" fn getservent() -> *const servent {
     }
     serv_aliases.push(vec![b'\0']);
 
-    SERV_ENTRY = servent {
-        s_name: serv_name.as_mut_slice().as_mut_ptr() as *mut c_char,
-        s_aliases: serv_aliases.iter_mut().map(|x| x.as_mut_ptr() as *mut i8).collect::<Vec<*mut c_char>>().as_mut_ptr(),
-        s_port: SERV_PORT.unwrap(),
-        s_proto: proto.as_mut_slice().as_mut_ptr() as *mut c_char
-    };
-
     SERV_ALIASES = Some(serv_aliases);
     SERV_NAME = Some(serv_name);
     SERV_PROTO = Some(proto);
+
+    SERV_ENTRY = servent {
+        s_name: SERV_NAME.unwrap().as_mut_slice().as_mut_ptr() as *mut c_char,
+        s_aliases: SERV_ALIASES.unwrap().iter_mut().map(|x| x.as_mut_ptr() as *mut i8).collect::<Vec<*mut c_char>>().as_mut_ptr(),
+        s_port: SERV_PORT.unwrap(),
+        s_proto: SERV_PROTO.unwrap().as_mut_slice().as_mut_ptr() as *mut c_char
+    };
+
     if SERV_STAYOPEN == 0 { endservent(); }
     &SERV_ENTRY as *const servent
 }
