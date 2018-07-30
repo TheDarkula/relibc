@@ -159,6 +159,8 @@ static mut SERV_PROTO: Option<Vec<u8>> = None;
 static mut S_LINE: Option<RawLineBuffer> = None;
 static mut SERV_STAYOPEN: c_int = 0;
 
+const NULL_ALIASES: [*mut c_char; 2] = [ptr::null_mut(); 2];
+
 fn bytes_to_box_str(bytes: &[u8]) -> Box<str> {
     Box::from(core::str::from_utf8(bytes).unwrap_or(""))
 }
@@ -409,7 +411,7 @@ pub unsafe extern "C" fn gethostbyaddr(v: *const c_void, length: socklen_t, form
             HOST_NAME = Some(host_name);
             HOST_ENTRY = hostent {
                 h_name: HOST_NAME.as_mut().unwrap().as_mut_ptr() as *mut c_char,
-                h_aliases: [ptr::null_mut();2].as_mut_ptr(), //TODO actually get aliases
+                h_aliases: NULL_ALIASES.as_mut_ptr(), //TODO actually get aliases
                 h_addrtype: format,
                 h_length: length as i32,
                 h_addr_list: HOST_ADDR_LIST.as_mut_ptr()
@@ -441,7 +443,7 @@ pub unsafe extern "C" fn gethostbyname(name: *const c_char) -> *const hostent {
 
     HOST_ENTRY = hostent {
         h_name: HOST_NAME.as_mut().unwrap().as_mut_ptr() as *mut c_char,
-        h_aliases: [ptr::null_mut();2].as_mut_ptr(),
+        h_aliases: NULL_ALIASES.as_mut_ptr(),
         h_addrtype: AF_INET,
         h_length: 4,
         h_addr_list: HOST_ADDR_LIST.as_mut_ptr()
