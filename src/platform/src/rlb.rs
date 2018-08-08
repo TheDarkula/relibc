@@ -1,5 +1,4 @@
 use alloc::vec::Vec;
-use core::{mem, ptr, str};
 use read;
 use types::*;
 
@@ -7,8 +6,9 @@ use types::*;
 #[derive(Clone)]
 pub struct RawLineBuffer {
     pub fd: c_int,
-    pub buf: Vec<u8>,
-    pub newline: Option<usize>
+    buf: Vec<u8>,
+    newline: Option<usize>,
+    read: usize
 }
 
 pub enum Line<'a> {
@@ -22,7 +22,8 @@ impl RawLineBuffer {
         Self {
             fd: fd,
             buf: Vec::new(),
-            newline: None
+            newline: None,
+            read: 0
         }
     }
 
@@ -56,20 +57,27 @@ impl RawLineBuffer {
 
             let read = read(self.fd, &mut self.buf[len..]);
 
-            // Remove all uninitialized memory that wasn't read
-            unsafe {
-                self.buf.set_len(len + read as usize);
-            }
-
             if read == 0 {
                 return Line::EOF;
             }
             if read < 0 {
                 return Line::Error;
             }
+
+            // Remove all uninitialized memory that wasn't read
+            unsafe {
+                self.buf.set_len(len + read as usize);
+            }
+
+            self.read += read as usize;
         }
 
         let newline = self.newline.unwrap(); // safe because it doesn't break the loop otherwise
         Line::Some(&self.buf[..newline])
+    }
+
+    /// Return the byte position of the start of the line
+    pub fn line_pos(&self) -> usize {
+        self.read - self.buf.len()
     }
 }
