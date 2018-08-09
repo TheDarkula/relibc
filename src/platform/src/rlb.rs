@@ -57,19 +57,21 @@ impl RawLineBuffer {
 
             let read = read(self.fd, &mut self.buf[len..]);
 
+            let read_usize = read.max(0) as usize;
+
+            // Remove all uninitialized memory that wasn't read
+            unsafe {
+                self.buf.set_len(len + read_usize);
+            }
+
+            self.read += read_usize;
+
             if read == 0 {
                 return Line::EOF;
             }
             if read < 0 {
                 return Line::Error;
             }
-
-            // Remove all uninitialized memory that wasn't read
-            unsafe {
-                self.buf.set_len(len + read as usize);
-            }
-
-            self.read += read as usize;
         }
 
         let newline = self.newline.unwrap(); // safe because it doesn't break the loop otherwise
