@@ -9,6 +9,7 @@ EXPECT_BINS=\
 	fcntl/fcntl \
 	locale \
 	math \
+	netdb \
 	setjmp \
 	signal \
 	stdio/all \

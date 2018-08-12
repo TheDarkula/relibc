@@ -15,5 +15,5 @@ platform = { path = "../platform" }
 netinet = { path = "../netinet" }
 sys_socket = { path = "../sys_socket" }
 stdlib = { path = "../stdlib" }
-string = { path = "../string" }
+strings = { path = "../strings" }
 time = { path = "../time" }

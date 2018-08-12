@@ -1,5 +1,6 @@
 use alloc::vec::Vec;
 use read;
+use ::{SEEK_SET, lseek};
 use types::*;
 
 /// Implements an `Iterator` which returns on either newline or EOF.
@@ -81,5 +82,14 @@ impl RawLineBuffer {
     /// Return the byte position of the start of the line
     pub fn line_pos(&self) -> usize {
         self.read - self.buf.len()
+    }
+
+    /// Seek to a byte position in the file
+    pub fn seek(&mut self, pos: usize) -> off_t {
+        let ret = lseek(self.fd, pos as i64, SEEK_SET);
+        if ret != !0 {
+            self.read = pos;
+        }
+        ret
     }
 }

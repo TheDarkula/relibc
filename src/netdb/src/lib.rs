@@ -12,7 +12,7 @@ extern crate errno;
 extern crate fcntl;
 extern crate platform;
 extern crate stdlib;
-extern crate string;
+extern crate strings;
 extern crate sys_socket;
 extern crate netinet;
 extern crate time;
@@ -20,6 +20,7 @@ extern crate time;
 mod dns;
 
 use core::{mem, str, ptr};
+use core::str::FromStr;
 
 use alloc::{Vec, String};
 use alloc::str::SplitWhitespace;
@@ -43,7 +44,7 @@ use netinet::in_h::{in_addr, IPPROTO_UDP, sockaddr_in};
 
 use stdlib::atoi;
 
-use string::{strcmp};
+use strings::strcasecmp;
 
 use sys_socket::{sockaddr, socklen_t};
 use sys_socket::constants::{SOCK_DGRAM, AF_INET};
@@ -114,7 +115,7 @@ static mut NET_ENTRY: netent = netent {
 static mut NET_NAME: Option<Vec<u8>> = None;
 static mut NET_ALIASES: [*const c_char; MAXALIASES] = [ptr::null(); MAXALIASES];
 static mut NET_NUM: Option<u64> = None;
-static mut N_LINE: Option<RawLineBuffer> = None;
+static mut N_POS: usize = 0;
 static mut NET_STAYOPEN: c_int = 0;
 
 static mut HOSTDB: c_int = 0;
@@ -130,7 +131,7 @@ static mut HOST_ALIASES: Option<Vec<Vec<u8>>> = None;
 static mut HOST_ADDR: Option<in_addr> = None;
 static mut HOST_ADDR_LIST: [*mut in_addr; 2] = [ptr::null_mut(); 2];
 static mut _HOST_ADDR_LIST: [u8;4] = [0u8;4];
-static mut H_LINE: Option<RawLineBuffer> = None;
+static mut H_POS: usize = 0;
 static mut HOST_STAYOPEN: c_int = 0;
 
 #[allow(non_upper_case_globals)]
@@ -150,7 +151,7 @@ static mut PROTO_ENTRY: protoent = protoent {
 static mut PROTO_NAME: Option<Vec<u8>> = None;
 static mut PROTO_ALIASES: Option<Vec<Vec<u8>>> = None;
 static mut PROTO_NUM: Option<c_int> = None;
-static mut P_LINE: Option<RawLineBuffer> = None;
+static mut P_POS: usize = 0; 
 static mut PROTO_STAYOPEN: c_int = 0;
 
 static mut SERVDB: c_int = 0;
@@ -165,7 +166,7 @@ static mut SERV_NAME: Option<Vec<u8>> = None;
 static mut SERV_ALIASES: Option<Vec<Vec<u8>>> = None;
 static mut SERV_PORT: Option<c_int> = None;
 static mut SERV_PROTO: Option<Vec<u8>> = None;
-static mut S_LINE: Option<RawLineBuffer> = None;
+static mut S_POS: usize = 0;
 static mut SERV_STAYOPEN: c_int = 0;
 
 const NULL_ALIASES: [*mut c_char; 2] = [ptr::null_mut(); 2];
@@ -391,24 +392,27 @@ fn parse_revdns_answer(data: Vec<u8>) -> Vec<u8> {
 #[no_mangle]
 pub unsafe extern "C" fn endhostent() {
     platform::close(HOSTDB);
+    HOSTDB = 0;
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn endnetent() {
     platform::close(NETDB);
+    NETDB = 0;
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn endprotoent() {
     platform::close(PROTODB);
+    PROTODB = 0;
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn endservent() {
     platform::close(SERVDB);
+    SERVDB = 0;
 }
 
-//TODO read hosts file
 #[no_mangle]
 pub unsafe extern "C" fn gethostbyaddr(v: *const c_void, length: socklen_t, format:c_int) -> *const hostent {
     let addr: in_addr = *(v as *mut in_addr);
@@ -419,9 +423,12 @@ pub unsafe extern "C" fn gethostbyaddr(v: *const c_void, length: socklen_t, form
         loop {
             let mut cp = (*p).h_addr_list;
             if cp == ptr::null_mut() {
+                // clean up after ourselves
+                sethostent(HOST_STAYOPEN);
                 break;
             }
-            if mem::transmute::<in_addr, u32>(**cp) == mem::transmute::<in_addr, u32>(addr) {
+            if (**cp).s_addr == addr.s_addr {
+                sethostent(HOST_STAYOPEN);
                 return p;
             }
             cp = cp.offset(1);
@@ -447,28 +454,55 @@ pub unsafe extern "C" fn gethostbyaddr(v: *const c_void, length: socklen_t, form
     }
 }
 
-//TODO Read hosts file
 #[no_mangle]
 pub unsafe extern "C" fn gethostbyname(name: *const c_char) -> *const hostent {
+
+    // check if some idiot gave us an address instead of a name
+    let mut octets = str::from_utf8_unchecked(c_str(name)).split('.');
+    let mut s_addr = [0u8;4];
+    let mut is_addr = true; 
+    for i in 0..4 {
+        if let Some(n) = octets.next().and_then(|x| u8::from_str(x).ok()) {
+            s_addr[i] = n;
+        } else {
+            is_addr = false;
+        }
+    }
+    if octets.next() != None {
+        is_addr = false;
+    }
+
+    if is_addr == true {
+        let addr = in_addr {
+            s_addr: mem::transmute::<[u8;4], u32>(s_addr),
+        };
+        return gethostbyaddr(&addr as *const _ as *const c_void, 4, AF_INET);
+    }
 
     // check the hosts file first
     let mut p: *const hostent;
     while { p = gethostent(); p!=ptr::null() } {
-        if strcmp((*p).h_name, name) == 0 {
+        if strcasecmp((*p).h_name, name) == 0 {
+            sethostent(HOST_STAYOPEN);
             return p;
         }
+        let mut cp = (*p).h_aliases;
         loop {
-            let mut cp = (*p).h_aliases;
             if cp == ptr::null_mut() {
+                sethostent(HOST_STAYOPEN);
                 break;
             }
-            if strcmp(*cp, name) == 0 {
+            if (*cp) == ptr::null_mut() {
+                sethostent(HOST_STAYOPEN);
+                break;
+            }
+            if strcasecmp(*cp, name) == 0 {
+                sethostent(HOST_STAYOPEN);
                 return p;
             }
             cp = cp.offset(1);
         }
     }
-
 
     // XXX h_errno
     let mut addr = mem::uninitialized();
@@ -500,12 +534,14 @@ pub unsafe extern "C" fn gethostbyname(name: *const c_char) -> *const hostent {
 pub unsafe extern "C" fn gethostent() -> *const hostent {
     if HOSTDB == 0 {
         HOSTDB = open(cstr_from_bytes_with_nul_unchecked(b"/etc/hosts\0"), O_RDONLY, 0);
-        H_LINE = Some(RawLineBuffer::new(HOSTDB));
     }
+    platform::lseek(HOSTDB, H_POS as i64, SEEK_SET);
+    let mut rlb = RawLineBuffer::new(HOSTDB);
+    //rlb.seek(H_POS);
 
     let mut r: Box<str> = Box::default();
     while r.is_empty() || r.split_whitespace().next() == None || r.starts_with("#") {
-        r = match H_LINE.as_mut().unwrap().next() {
+        r = match rlb.next() {
             Line::Some(s) => bytes_to_box_str(s),
             _ => {
                 if HOST_STAYOPEN == 0 { endhostent(); }
@@ -513,6 +549,8 @@ pub unsafe extern "C" fn gethostent() -> *const hostent {
             }
         };
     }
+    rlb.next();
+    H_POS += rlb.line_pos();
 
     let mut iter: SplitWhitespace = r.split_whitespace();
 
@@ -530,7 +568,7 @@ pub unsafe extern "C" fn gethostent() -> *const hostent {
     let mut host_name = iter.next().unwrap().as_bytes().to_vec();
     host_name.push(b'\0');
 
-    let mut host_aliases: Vec<Vec<u8>> = Vec::new();
+    let mut _host_aliases: Vec<Vec<u8>> = Vec::new();
 
     loop {
         let mut alias = match iter.next() {
@@ -538,21 +576,24 @@ pub unsafe extern "C" fn gethostent() -> *const hostent {
             None => break
         };
         alias.push(b'\0');
-        host_aliases.push(alias);
+        _host_aliases.push(alias);
     }
-
-    host_aliases.push(vec![b'\0']);
+    let mut host_aliases: Vec<*mut i8> = _host_aliases.iter_mut().map(|x| x.as_mut_ptr() as *mut i8).collect();
+    host_aliases.push(ptr::null_mut());
 
     HOST_NAME = Some(host_name);
-    HOST_ALIASES = Some(host_aliases);
+    HOST_ALIASES = Some(_host_aliases);
 
     HOST_ENTRY = hostent {
         h_name: HOST_NAME.as_mut().unwrap().as_mut_ptr() as *mut c_char,
-        h_aliases: HOST_ALIASES.as_mut().unwrap().as_mut_slice().as_mut_ptr() as *mut *mut i8,
+        h_aliases: host_aliases.as_mut_slice().as_mut_ptr() as *mut *mut i8,
         h_addrtype: AF_INET,
         h_length: 4,
         h_addr_list: HOST_ADDR_LIST.as_mut_ptr()
     };
+        if HOST_STAYOPEN == 0 { 
+            endhostent(); 
+        }
         &HOST_ENTRY as *const hostent
 }
 
@@ -572,15 +613,65 @@ pub unsafe extern "C" fn getnetent() -> *const netent {
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn getprotobyname(name: *const c_char) -> *const protoent {
+    let mut p: *const protoent;
+    while {p=getprotoent();
+           p!=ptr::null()} {
+        if strcasecmp((*p).p_name, name) == 0 {
+            setprotoent(PROTO_STAYOPEN);
+            return p;
+        }
+
+        let mut cp = (*p).p_aliases;
+        loop {
+            if cp == ptr::null_mut() {
+                setprotoent(PROTO_STAYOPEN);
+                break;
+            }
+            if (*cp) == ptr::null_mut() {
+                setprotoent(PROTO_STAYOPEN);
+                break;
+            }
+			if strcasecmp(*cp, name) == 0 {
+                setprotoent(PROTO_STAYOPEN);
+			    return p;
+			}
+			cp = cp.offset(1);
+	    }
+    }
+    setprotoent(PROTO_STAYOPEN);
+    
+    platform::errno = ENOENT;
+    ptr::null() as *const protoent
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn getprotobynumber(number: c_int) -> *const protoent {
+    let mut p: *const protoent;
+    while {p=getprotoent();
+           p!=ptr::null()} {
+        if (*p).p_proto == number {
+            setprotoent(PROTO_STAYOPEN);
+            return p;
+        }
+    }
+    setprotoent(PROTO_STAYOPEN);
+    platform::errno = ENOENT;
+    ptr::null() as *const protoent
+ }
+
+#[no_mangle]
 pub unsafe extern "C" fn getprotoent() -> *const protoent {
     if PROTODB == 0 {
         PROTODB = open(cstr_from_bytes_with_nul_unchecked(b"/etc/protocols\0"), O_RDONLY, 0);
-        P_LINE = Some(RawLineBuffer::new(PROTODB));
     }
+
+    let mut rlb = RawLineBuffer::new(PROTODB);
+    rlb.seek(P_POS);
 
     let mut r: Box<str> = Box::default();
     while r.is_empty() || r.split_whitespace().next() == None || r.starts_with("#") {
-        r = match P_LINE.as_mut().unwrap().next() {
+        r = match rlb.next() {
             Line::Some(s) => bytes_to_box_str(s),
             _ => {
                 if PROTO_STAYOPEN == 0 { endprotoent(); }
@@ -588,6 +679,8 @@ pub unsafe extern "C" fn getprotoent() -> *const protoent {
             },
         };
     }
+    rlb.next();
+    P_POS = rlb.line_pos();
 
     let mut iter: SplitWhitespace = r.split_whitespace();
 
@@ -598,24 +691,25 @@ pub unsafe extern "C" fn getprotoent() -> *const protoent {
     num.push(b'\0');
     PROTO_NUM = Some(atoi(num.as_mut_slice().as_mut_ptr() as *mut i8));
 
-    let mut proto_aliases: Vec<Vec<u8>> = Vec::new();
+    let mut _proto_aliases: Vec<Vec<u8>> = Vec::new();
     loop {
         let mut alias = match iter.next() {
             Some(s) => s.as_bytes().to_vec(),
             None => break
         };
         alias.push(b'\0');
-        proto_aliases.push(alias);
+        _proto_aliases.push(alias);
     }
-    proto_aliases.push(vec![b'\0']);
+    let mut proto_aliases: Vec<*mut i8> = _proto_aliases.iter_mut().map(|x| x.as_mut_ptr() as *mut i8).collect();
+    proto_aliases.push(ptr::null_mut());
 
-    PROTO_ALIASES = Some(proto_aliases);
+    PROTO_ALIASES = Some(_proto_aliases);
     PROTO_NAME = Some(proto_name);
 
 
     PROTO_ENTRY = protoent { 
         p_name: PROTO_NAME.as_mut().unwrap().as_mut_slice().as_mut_ptr() as *mut c_char,
-        p_aliases: PROTO_ALIASES.as_mut().unwrap().iter_mut().map(|x| x.as_mut_ptr() as *mut i8).collect::<Vec<*mut i8>>().as_mut_ptr(),
+        p_aliases: proto_aliases.as_mut_slice().as_mut_ptr() as *mut *mut i8,
         p_proto: PROTO_NUM.unwrap()           
     };
         if PROTO_STAYOPEN == 0 { endprotoent(); }
@@ -630,7 +724,7 @@ pub unsafe extern "C" fn getservbyname(
     let mut p: *const servent;
 
     while { p = getservent(); p!=ptr::null() } {
-        if strcmp((*p).s_name, name) == 0 && strcmp((*p).s_proto, proto) == 0 {
+        if strcasecmp((*p).s_name, name) == 0 && strcasecmp((*p).s_proto, proto) == 0 {
             return p;
         }
         loop {
@@ -638,7 +732,7 @@ pub unsafe extern "C" fn getservbyname(
             if cp == ptr::null_mut() {
                 break;
             }
-            if strcmp(*cp, name) == 0 && strcmp((*p).s_proto, proto) == 0 {
+            if strcasecmp(*cp, name) == 0 && strcasecmp((*p).s_proto, proto) == 0 {
                 return p;
             }
             cp = cp.offset(1);
@@ -655,7 +749,7 @@ pub unsafe extern "C" fn getservbyport(
 -> *const servent {
     let mut p: *const servent;
     while { p=getservent(); p!=ptr::null()} {
-        if (*p).s_port == port && strcmp((*p).s_proto, proto) == 0 {
+        if (*p).s_port == port && strcasecmp((*p).s_proto, proto) == 0 {
             return p;
         }
     }
@@ -667,12 +761,12 @@ pub unsafe extern "C" fn getservbyport(
 pub unsafe extern "C" fn getservent() -> *const servent {
     if SERVDB == 0 {
         SERVDB = platform::open(b"/etc/services".as_ptr() as *const c_char, O_RDONLY, 0);
-        S_LINE = Some(RawLineBuffer::new(SERVDB));
     }
+    let mut rlb = RawLineBuffer::new(SERVDB);
 
     let mut r: Box<str> = Box::default();
     while r.is_empty() || r.split_whitespace().next() == None || r.starts_with("#") {
-        r = match S_LINE.as_mut().unwrap().next() {
+        r = match rlb.next() {
             Line::Some(s) => bytes_to_box_str(s),
             _ => {
                 if SERV_STAYOPEN == 0 { endservent(); }
@@ -723,7 +817,7 @@ pub unsafe extern "C" fn sethostent(stayopen: c_int) {
     } else {
        platform::lseek(HOSTDB, 0, SEEK_SET);
     }
-    H_LINE = Some(RawLineBuffer::new(HOSTDB));
+    H_POS = 0;
 }
 
 #[no_mangle]
@@ -733,8 +827,8 @@ pub unsafe extern "C" fn setnetent(stayopen: c_int) {
         NETDB = platform::open(b"/etc/networks\0".as_ptr() as *const c_char, O_RDONLY, 0)
     } else {
        platform::lseek(NETDB, 0, SEEK_SET);
+       N_POS = 0;
     }
-    N_LINE = Some(RawLineBuffer::new(NETDB));
 }
 
 #[no_mangle]
@@ -744,8 +838,8 @@ pub unsafe extern "C" fn setprotoent(stayopen: c_int) {
         PROTODB = platform::open(b"/etc/protocols\0".as_ptr() as *const c_char, O_RDONLY, 0)
     } else {
        platform::lseek(PROTODB, 0, SEEK_SET);
+       P_POS = 0;
     }
-    P_LINE = Some(RawLineBuffer::new(PROTODB));
 }
 
 #[no_mangle]
@@ -755,8 +849,8 @@ pub unsafe extern "C" fn setservent(stayopen: c_int) {
         SERVDB = platform::open(b"/etc/services\0".as_ptr() as *const c_char, O_RDONLY, 0)
     } else {
        platform::lseek(SERVDB, 0, SEEK_SET);
+       S_POS = 0;
     }
-    S_LINE = Some(RawLineBuffer::new(SERVDB));
 }
 
 #[no_mangle]
