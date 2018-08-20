@@ -28,7 +28,7 @@ use alloc::string::ToString;
 use alloc::vec::IntoIter;
 use alloc::boxed::Box;
 
-use arpainet::{htons, inet_aton};
+use arpainet::{htons, ntohs, inet_aton};
 
 use errno::*;
 
@@ -419,6 +419,7 @@ pub unsafe extern "C" fn gethostbyaddr(v: *const c_void, length: socklen_t, form
 
     // check the hosts file first
     let mut p: *const hostent;
+    sethostent(HOST_STAYOPEN);
     while { p=gethostent(); p!=ptr::null()} {
         loop {
             let mut cp = (*p).h_addr_list;
@@ -481,6 +482,7 @@ pub unsafe extern "C" fn gethostbyname(name: *const c_char) -> *const hostent {
 
     // check the hosts file first
     let mut p: *const hostent;
+    sethostent(HOST_STAYOPEN);
     while { p = gethostent(); p!=ptr::null() } {
         if strcasecmp((*p).h_name, name) == 0 {
             sethostent(HOST_STAYOPEN);
@@ -535,9 +537,8 @@ pub unsafe extern "C" fn gethostent() -> *const hostent {
     if HOSTDB == 0 {
         HOSTDB = open(cstr_from_bytes_with_nul_unchecked(b"/etc/hosts\0"), O_RDONLY, 0);
     }
-    platform::lseek(HOSTDB, H_POS as i64, SEEK_SET);
     let mut rlb = RawLineBuffer::new(HOSTDB);
-    //rlb.seek(H_POS);
+    rlb.seek(H_POS);
 
     let mut r: Box<str> = Box::default();
     while r.is_empty() || r.split_whitespace().next() == None || r.starts_with("#") {
@@ -549,8 +550,14 @@ pub unsafe extern "C" fn gethostent() -> *const hostent {
             }
         };
     }
-    rlb.next();
-    H_POS += rlb.line_pos();
+    match rlb.next() {
+        Line::Some(s) => {},
+        _ => {
+            if HOST_STAYOPEN == 0 { endhostent(); }
+            return ptr::null();
+        }
+    }
+    H_POS = rlb.line_pos();
 
     let mut iter: SplitWhitespace = r.split_whitespace();
 
@@ -615,6 +622,7 @@ pub unsafe extern "C" fn getnetent() -> *const netent {
 #[no_mangle]
 pub unsafe extern "C" fn getprotobyname(name: *const c_char) -> *const protoent {
     let mut p: *const protoent;
+    setprotoent(PROTO_STAYOPEN);
     while {p=getprotoent();
            p!=ptr::null()} {
         if strcasecmp((*p).p_name, name) == 0 {
@@ -647,6 +655,7 @@ pub unsafe extern "C" fn getprotobyname(name: *const c_char) -> *const protoent 
 
 #[no_mangle]
 pub unsafe extern "C" fn getprotobynumber(number: c_int) -> *const protoent {
+    setprotoent(PROTO_STAYOPEN);
     let mut p: *const protoent;
     while {p=getprotoent();
            p!=ptr::null()} {
@@ -721,23 +730,24 @@ pub unsafe extern "C" fn getservbyname(
     name: *const c_char,
     proto: *const c_char)
 -> *const servent {
+    setservent(SERV_STAYOPEN);
     let mut p: *const servent;
-
-    while { p = getservent(); p!=ptr::null() } {
-        if strcasecmp((*p).s_name, name) == 0 && strcasecmp((*p).s_proto, proto) == 0 {
-            return p;
-        }
-        loop {
-            let mut cp = (*p).s_aliases;
-            if cp == ptr::null_mut() {
-                break;
-            }
-            if strcasecmp(*cp, name) == 0 && strcasecmp((*p).s_proto, proto) == 0 {
+    if proto.is_null() {
+        while { p = getservent(); p!=ptr::null() } {
+            if strcasecmp((*p).s_name, name) == 0 {
+                setservent(SERV_STAYOPEN);
                 return p;
             }
-            cp = cp.offset(1);
+        }
+    } else {
+        while { p = getservent(); p!=ptr::null() } {
+            if strcasecmp((*p).s_name, name) == 0 && strcasecmp((*p).s_proto, proto) == 0 {
+                setservent(SERV_STAYOPEN);
+                return p;
+            }
         }
     }
+    setservent(SERV_STAYOPEN);
     platform::errno = ENOENT;
     ptr::null() as *const servent
 }
@@ -747,12 +757,24 @@ pub unsafe extern "C" fn getservbyport(
     port: c_int,
     proto: *const c_char)
 -> *const servent {
+    setservent(SERV_STAYOPEN);
     let mut p: *const servent;
-    while { p=getservent(); p!=ptr::null()} {
-        if (*p).s_port == port && strcasecmp((*p).s_proto, proto) == 0 {
-            return p;
+    if proto.is_null() {
+        while { p=getservent(); p!=ptr::null()} {
+                if (*p).s_port == port {
+                    setservent(SERV_STAYOPEN);
+                    return p;
+                }
+        }
+    } else {
+        while { p=getservent(); p!=ptr::null()} {
+            if (*p).s_port == port && strcasecmp((*p).s_proto, proto) == 0 {
+                setservent(SERV_STAYOPEN);
+                return p;
+            }
         }
     }
+    setservent(SERV_STAYOPEN);
     platform::errno = ENOENT;
     ptr::null()
 }
@@ -760,9 +782,10 @@ pub unsafe extern "C" fn getservbyport(
 #[no_mangle]
 pub unsafe extern "C" fn getservent() -> *const servent {
     if SERVDB == 0 {
-        SERVDB = platform::open(b"/etc/services".as_ptr() as *const c_char, O_RDONLY, 0);
+        SERVDB = open(cstr_from_bytes_with_nul_unchecked(b"/etc/services\0"), O_RDONLY, 0);
     }
     let mut rlb = RawLineBuffer::new(SERVDB);
+    rlb.seek(S_POS);
 
     let mut r: Box<str> = Box::default();
     while r.is_empty() || r.split_whitespace().next() == None || r.starts_with("#") {
@@ -774,33 +797,48 @@ pub unsafe extern "C" fn getservent() -> *const servent {
             }
         };
     }
+
+    rlb.next();
+    S_POS = rlb.line_pos(); 
+
     let mut iter: SplitWhitespace = r.split_whitespace();
     let mut serv_name: Vec<u8> = iter.next().unwrap().as_bytes().to_vec();
     serv_name.push(b'\0');
     let port_proto = iter.next().unwrap();
     let mut split = port_proto.split("/");
-    let port = atoi(split.next().unwrap().as_ptr() as *const c_char);
-    SERV_PORT = Some(port);
-    let proto = split.next().unwrap().as_bytes().to_vec();
+    let mut port = split.next().unwrap().as_bytes().to_vec();
+    port.push(b'\0');
+    SERV_PORT = Some(htons(atoi(port.as_mut_slice().as_mut_ptr() as *mut i8) as u16) as u32 as i32);
+    let mut proto = split.next().unwrap().as_bytes().to_vec();
+    proto.push(b'\0');
 
-    let mut serv_aliases: Vec<Vec<u8>> = Vec::new();
-    loop {
-        let mut alias = match iter.next() {
-            Some(s) => s.as_bytes().to_vec(),
-            None => break
-        };
-        alias.push(b'\0');
-        serv_aliases.push(alias);
-    }
-    serv_aliases.push(vec![b'\0']);
-
-    SERV_ALIASES = Some(serv_aliases);
+    /*
+     *let mut _serv_aliases: Vec<Vec<u8>> = Vec::new();
+     *loop {
+     *    let mut alias = match iter.next() {
+     *        Some(s) => s.as_bytes().to_vec(),
+     *        _ => break
+     *    };
+     *    alias.push(b'\0');
+     *    _serv_aliases.push(alias);
+     *}
+     *let mut serv_aliases: Vec<*mut i8> = _serv_aliases.iter_mut().map(|x| x.as_mut_ptr() as *mut i8).collect();
+     *serv_aliases.push(ptr::null_mut());
+     * 
+     */
+    let mut _serv_aliases: Vec<Vec<u8>> = Vec::new();
+    _serv_aliases.push(vec![b'\0']);
+    let mut serv_aliases: Vec<*mut i8> = Vec::new(); 
+    serv_aliases.push(ptr::null_mut());
+    serv_aliases.push(ptr::null_mut());
+    
+    SERV_ALIASES = Some(_serv_aliases);
     SERV_NAME = Some(serv_name);
     SERV_PROTO = Some(proto);
 
     SERV_ENTRY = servent {
         s_name: SERV_NAME.as_mut().unwrap().as_mut_slice().as_mut_ptr() as *mut c_char,
-        s_aliases: SERV_ALIASES.as_mut().unwrap().iter_mut().map(|x| x.as_mut_ptr() as *mut i8).collect::<Vec<*mut c_char>>().as_mut_ptr(),
+        s_aliases: serv_aliases.as_mut_slice().as_mut_ptr() as *mut *mut i8, 
         s_port: SERV_PORT.unwrap(),
         s_proto: SERV_PROTO.as_mut().unwrap().as_mut_slice().as_mut_ptr() as *mut c_char
     };

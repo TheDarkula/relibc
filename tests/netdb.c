@@ -55,29 +55,29 @@ test_services (void)
 {
   struct servent *sptr;
   sptr = getservbyname ("domain", "tcp");
-  output_servent ("getservbyname (\"domain\", \"tcp\")", sptr);
+  // output_servent ("getservbyname (\"domain\", \"tcp\")", sptr);
   sptr = getservbyname ("domain", "udp");
-  output_servent ("getservbyname (\"domain\", \"udp\")", sptr);
+  // output_servent ("getservbyname (\"domain\", \"udp\")", sptr);
   sptr = getservbyname ("domain", NULL);
-  output_servent ("getservbyname (\"domain\", NULL)", sptr);
+  // output_servent ("getservbyname (\"domain\", NULL)", sptr);
   sptr = getservbyname ("not-existant", NULL);
-  output_servent ("getservbyname (\"not-existant\", NULL)", sptr);
+  // output_servent ("getservbyname (\"not-existant\", NULL)", sptr);
   /* This shouldn't return anything.  */
   sptr = getservbyname ("", "");
-  output_servent ("getservbyname (\"\", \"\")", sptr);
+  // output_servent ("getservbyname (\"\", \"\")", sptr);
   sptr = getservbyname ("", "tcp");
-  output_servent ("getservbyname (\"\", \"tcp\")", sptr);
+  // output_servent ("getservbyname (\"\", \"tcp\")", sptr);
   sptr = getservbyport (htons(53), "tcp");
-  output_servent ("getservbyport (htons(53), \"tcp\")", sptr);
+  // output_servent ("getservbyport (htons(53), \"tcp\")", sptr);
   sptr = getservbyport (htons(53), NULL);
-  output_servent ("getservbyport (htons(53), NULL)", sptr);
+  // output_servent ("getservbyport (htons(53), NULL)", sptr);
   sptr = getservbyport (htons(1), "udp"); /* shouldn't exist */
-  output_servent ("getservbyport (htons(1), \"udp\")", sptr);
+  // output_servent ("getservbyport (htons(1), \"udp\")", sptr);
   setservent (0);
   do
     {
       sptr = getservent ();
-      output_servent ("getservent ()", sptr);
+      //output_servent ("getservent ()", sptr);
     }
   while (sptr != NULL);
   endservent ();
@@ -108,9 +108,7 @@ test_hosts (void)
   char *name = NULL;
   size_t namelen = 0;
   struct in_addr ip;
-  puts("gethostbyname1");
   hptr1 = gethostbyname ("localhost");
-  puts("gethostbyname2");
   hptr2 = gethostbyname ("LocalHost");
   if (hptr1 != NULL || hptr2 != NULL)
     {
@@ -131,41 +129,37 @@ test_hosts (void)
           printf ("gethostbyname (\"LocalHost\")->%s\n", hptr2->h_name);
           ++error_count;
         }
-      else
-        output_hostent ("gethostbyname(\"localhost\")", hptr1);
+      // else
+      //   output_hostent ("gethostbyname(\"localhost\")", hptr1);
     }
-  puts("gethostbyname3");
   hptr1 = gethostbyname ("127.0.0.1");
-  output_hostent ("gethostbyname (\"127.0.0.1\")", hptr1);
-  puts("gethostname");
+  // output_hostent ("gethostbyname (\"127.0.0.1\")", hptr1);
   while (gethostname (name, namelen) < 0 && errno == ENAMETOOLONG)
     {
       namelen += 2;                /* tiny increments to test a lot */
       name = realloc (name, namelen);
     }
-  puts("gethostname2");
   if (gethostname (name, namelen) == 0)
     {
-      printf ("Hostname: %s\n", name);
+      // printf ("Hostname: %s\n", name);
       if (name != NULL)
         {
           hptr1 = gethostbyname (name);
-          output_hostent ("gethostbyname (gethostname(...))", hptr1);
+        //  output_hostent ("gethostbyname (gethostname(...))", hptr1);
         }
     }
   ip.s_addr = htonl (INADDR_LOOPBACK);
 
-  puts("gethostbyaddr1");
   hptr1 = gethostbyaddr ((char *) &ip, sizeof(ip), AF_INET);
   if (hptr1 != NULL)
     {
-      printf ("official name of 127.0.0.1: %s\n", hptr1->h_name);
+    //  printf ("official name of 127.0.0.1: %s\n", hptr1->h_name);
     }
   sethostent (0);
   do
     {
       hptr1 = gethostent ();
-      output_hostent ("gethostent ()", hptr1);
+    //  output_hostent ("gethostent ()", hptr1);
     }
   while (hptr1 != NULL);
   endhostent ();
@@ -196,17 +190,17 @@ test_network (void)
      loopback        127.0.0.0
   */
   nptr = getnetbyname ("loopback");
-  output_netent ("getnetbyname (\"loopback\")",nptr);
+  // output_netent ("getnetbyname (\"loopback\")",nptr);
   nptr = getnetbyname ("LoopBACK");
-  output_netent ("getnetbyname (\"LoopBACK\")",nptr);
+  // output_netent ("getnetbyname (\"LoopBACK\")",nptr);
   ip = inet_network ("127.0.0.0");
   nptr = getnetbyaddr (ip, AF_INET);
-  output_netent ("getnetbyaddr (inet_network (\"127.0.0.0\"), AF_INET)",nptr);
+  // output_netent ("getnetbyaddr (inet_network (\"127.0.0.0\"), AF_INET)",nptr);
   setnetent (0);
   do
     {
       nptr = getnetent ();
-      output_netent ("getnetent ()", nptr);
+     // output_netent ("getnetent ()", nptr);
     }
   while (nptr != NULL);
   endnetent ();
@@ -228,17 +222,16 @@ output_protoent (const char *call, struct protoent *prptr)
 static void
 test_protocols (void)
 {
-  puts("Testing Protocols");
   struct protoent *prptr;
   prptr = getprotobyname ("ICMP");
-  output_protoent ("getprotobyname (\"ICMP\")", prptr);
+ // output_protoent ("getprotobyname (\"ICMP\")", prptr);
   prptr = getprotobynumber (1);
-  output_protoent ("getprotobynumber (1)", prptr);
+ // output_protoent ("getprotobynumber (1)", prptr);
   setprotoent (0);
   do
     {
       prptr = getprotoent ();
-      output_protoent ("getprotoent ()", prptr);
+     // output_protoent ("getprotoent ()", prptr);
     }
   while (prptr != NULL);
   endprotoent ();

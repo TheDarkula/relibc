@@ -12,6 +12,7 @@ pub struct RawLineBuffer {
     read: usize
 }
 
+#[derive(PartialEq)]
 pub enum Line<'a> {
     Error,
     EOF,
