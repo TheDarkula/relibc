@@ -549,9 +549,17 @@ pub unsafe extern "C" fn gethostbyname(name: *const c_char) -> *const hostent {
     HOST_ADDR_LIST = [_HOST_ADDR_LIST.as_mut_ptr() as *mut in_addr, ptr::null_mut()];
     HOST_ADDR = Some(host_addr);
 
+    //TODO actually get aliases
+    let mut _host_aliases: Vec<Vec<u8>> = Vec::new();
+    _host_aliases.push(vec![b'\0']);
+    let mut host_aliases: Vec<*mut i8> = Vec::new(); 
+    host_aliases.push(ptr::null_mut());
+    host_aliases.push(ptr::null_mut());
+    HOST_ALIASES = Some(_host_aliases);
+
     HOST_ENTRY = hostent {
         h_name: HOST_NAME.as_mut().unwrap().as_mut_ptr() as *mut c_char,
-        h_aliases: NULL_ALIASES.as_mut_ptr(),
+        h_aliases: host_aliases.as_mut_slice().as_mut_ptr() as *mut *mut i8, 
         h_addrtype: AF_INET,
         h_length: 4,
         h_addr_list: HOST_ADDR_LIST.as_mut_ptr()
