@@ -92,7 +92,6 @@ impl Dns {
             push_n16!(query.q_type);
             push_n16!(query.q_class);
         }
-
         data
     }
 

@@ -175,7 +175,7 @@ fn bytes_to_box_str(bytes: &[u8]) -> Box<str> {
     Box::from(core::str::from_utf8(bytes).unwrap_or(""))
 }
 
-fn lookup_host(host: &str) -> Result<LookupHost, ()> {
+fn lookup_host(host: &str) -> Result<LookupHost, c_int> {
     let dns_string = platform::get_dns_server();
 
     let dns_vec: Vec<u8> = dns_string
@@ -184,13 +184,13 @@ fn lookup_host(host: &str) -> Result<LookupHost, ()> {
         .map(|octet| octet.parse::<u8>().unwrap_or(0))
         .collect();
 
-    let mut dns_arr =  [0u8;4];
-
-    for (i, octet) in dns_vec.iter().enumerate() {
-        dns_arr[i] = *octet;
-    }
-
     if dns_vec.len() == 4 {
+        let mut dns_arr =  [0u8;4];
+        for (i, octet) in dns_vec.iter().enumerate() {
+            dns_arr[i] = *octet;
+        }
+        let dns_addr = unsafe {mem::transmute::<[u8;4], u32>(dns_arr)};
+
         let mut timespec = timespec::default();
         platform::clock_gettime(time::constants::CLOCK_REALTIME, &mut timespec);
         let tid = (timespec.tv_nsec >> 16) as u16;
@@ -209,7 +209,10 @@ fn lookup_host(host: &str) -> Result<LookupHost, ()> {
         };
 
         let packet_data = packet.compile();
-        let packet_data_ptr = &packet_data as *const _ as *const c_void;
+        let packet_data_len = packet_data.len();
+
+        let packet_data_box = packet_data.into_boxed_slice(); 
+        let packet_data_ptr = Box::into_raw(packet_data_box) as *mut _ as *mut c_void;
 
         let sock = unsafe {sys_socket::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP as i32)};
 
@@ -217,29 +220,38 @@ fn lookup_host(host: &str) -> Result<LookupHost, ()> {
             sin_family: AF_INET as u16,
             sin_port: htons(53),
             sin_addr: in_addr {
-                s_addr: unsafe { mem::transmute::<[u8;4], u32>(dns_arr) },
+                s_addr: dns_addr,
             },
+            ..Default::default()
         };
-
+        
         let dest_ptr = &mut dest as *mut _ as *mut sockaddr;
 
         unsafe {
-            if sys_socket::sendto(sock, packet_data_ptr, packet_data.len(), 0, dest_ptr, 4) < 0 {
-                return Err(());
+            if sys_socket::sendto(sock, packet_data_ptr, packet_data_len, 0, dest_ptr, 16) < 0 {
+                Box::from_raw(packet_data_ptr);
+                return Err(EIO);
             }
         }
 
-        let mut i = mem::size_of::<sockaddr_in>() as socklen_t;
+        unsafe {
+            Box::from_raw(packet_data_ptr);
+        }
+
+        let mut i = 0 as socklen_t;
         let mut buf = [0u8;65536];
         let buf_ptr = buf.as_mut_ptr() as *mut c_void;
 
         let mut count = -1;
 
+        let mut from: sockaddr = Default::default();
+        let from_ptr = &mut from as *mut sockaddr;
+
         unsafe {
-            count = sys_socket::recvfrom(sock, buf_ptr, 65536, 0, dest_ptr, &mut i as *mut socklen_t);
+            count = sys_socket::recvfrom(sock, buf_ptr, 65536, 0, from_ptr, &mut i as *mut socklen_t);
         }
         if count < 0 {
-            return Err(())
+            return Err(EIO)
         }
 
         match Dns::parse(&buf[..count as usize]) {
@@ -262,14 +274,14 @@ fn lookup_host(host: &str) -> Result<LookupHost, ()> {
                 }
                 Ok(LookupHost(addrs.into_iter()))
             }
-            Err(_err) => Err(()),
+            Err(_err) => Err(EINVAL),
         }
     } else {
-        Err(())
+        Err(EINVAL)
     }
 }
 
-fn lookup_addr(addr: in_addr) -> Result<Vec<Vec<u8>>, ()> {
+fn lookup_addr(addr: in_addr) -> Result<Vec<Vec<u8>>, c_int> {
     let dns_string = platform::get_dns_server();
 
     let dns_vec: Vec<u8> = dns_string
@@ -317,7 +329,10 @@ fn lookup_addr(addr: in_addr) -> Result<Vec<Vec<u8>>, ()> {
         };
 
         let packet_data = packet.compile();
-        let packet_data_ptr = &packet_data as *const _ as *const c_void;
+        use core::fmt::Write;
+        let packet_data_len = packet_data.len();
+        let packet_data_box = packet_data.into_boxed_slice();
+        let packet_data_ptr = Box::into_raw(packet_data_box) as *mut _ as *mut c_void;
 
         let sock = unsafe {sys_socket::socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP as i32)};
 
@@ -327,14 +342,19 @@ fn lookup_addr(addr: in_addr) -> Result<Vec<Vec<u8>>, ()> {
             sin_addr: in_addr {
                 s_addr: unsafe { mem::transmute::<[u8;4], u32>(dns_arr) },
             },
+            ..Default::default()
         };
 
         let dest_ptr = &mut dest as *mut _ as *mut sockaddr;
 
         unsafe {
-            if sys_socket::sendto(sock, packet_data_ptr, packet_data.len(), 0, dest_ptr, 4) < 0 {
-                return Err(());
+            if sys_socket::sendto(sock, packet_data_ptr, packet_data_len, 0, dest_ptr, 16) < 0 {
+                return Err(EIO);
             }
+        }
+
+        unsafe {
+            Box::from_raw(packet_data_ptr);
         }
 
         let mut i = mem::size_of::<sockaddr_in>() as socklen_t;
@@ -347,7 +367,7 @@ fn lookup_addr(addr: in_addr) -> Result<Vec<Vec<u8>>, ()> {
             count = sys_socket::recvfrom(sock, buf_ptr, 65536, 0, dest_ptr, &mut i as *mut socklen_t);
         }
         if count < 0 {
-            return Err(())
+            return Err(EIO)
         }
 
         match Dns::parse(&buf[..count as usize]) {
@@ -366,10 +386,10 @@ fn lookup_addr(addr: in_addr) -> Result<Vec<Vec<u8>>, ()> {
                 }
                 Ok(names)
             }
-            Err(_err) => Err(()),
+            Err(_err) => Err(EINVAL),
         }
     } else {
-        Err(())
+        Err(EINVAL)
     }
 }
 
@@ -421,11 +441,12 @@ pub unsafe extern "C" fn gethostbyaddr(v: *const c_void, length: socklen_t, form
     let mut p: *const hostent;
     sethostent(HOST_STAYOPEN);
     while { p=gethostent(); p!=ptr::null()} {
+        let mut cp = (*p).h_addr_list;
         loop {
-            let mut cp = (*p).h_addr_list;
-            if cp == ptr::null_mut() {
-                // clean up after ourselves
-                sethostent(HOST_STAYOPEN);
+            if cp.is_null() {
+                break;
+            }
+            if (*cp).is_null() {
                 break;
             }
             if (**cp).s_addr == addr.s_addr {
@@ -436,6 +457,15 @@ pub unsafe extern "C" fn gethostbyaddr(v: *const c_void, length: socklen_t, form
         }
     }
 
+    //TODO actually get aliases
+    let mut _host_aliases: Vec<Vec<u8>> = Vec::new();
+    _host_aliases.push(vec![b'\0']);
+    let mut host_aliases: Vec<*mut i8> = Vec::new(); 
+    host_aliases.push(ptr::null_mut());
+    host_aliases.push(ptr::null_mut());
+    HOST_ALIASES = Some(_host_aliases);
+
+
     match lookup_addr(addr) {
         Ok(s) => {
             _HOST_ADDR_LIST = mem::transmute::<u32, [u8;4]>(addr.s_addr);
@@ -444,14 +474,14 @@ pub unsafe extern "C" fn gethostbyaddr(v: *const c_void, length: socklen_t, form
             HOST_NAME = Some(host_name);
             HOST_ENTRY = hostent {
                 h_name: HOST_NAME.as_mut().unwrap().as_mut_ptr() as *mut c_char,
-                h_aliases: NULL_ALIASES.as_mut_ptr(), //TODO actually get aliases
+                h_aliases: host_aliases.as_mut_slice().as_mut_ptr() as *mut *mut i8, 
                 h_addrtype: format,
                 h_length: length as i32,
                 h_addr_list: HOST_ADDR_LIST.as_mut_ptr()
             };
             &HOST_ENTRY
         }
-        Err(()) => ptr::null()
+        Err(e) => { platform::errno = e; return ptr::null(); }
     }
 }
 
@@ -490,12 +520,10 @@ pub unsafe extern "C" fn gethostbyname(name: *const c_char) -> *const hostent {
         }
         let mut cp = (*p).h_aliases;
         loop {
-            if cp == ptr::null_mut() {
-                sethostent(HOST_STAYOPEN);
+            if cp.is_null() {
                 break;
             }
-            if (*cp) == ptr::null_mut() {
-                sethostent(HOST_STAYOPEN);
+            if (*cp).is_null() {
                 break;
             }
             if strcasecmp(*cp, name) == 0 {
@@ -506,14 +534,13 @@ pub unsafe extern "C" fn gethostbyname(name: *const c_char) -> *const hostent {
         }
     }
 
-    // XXX h_errno
-    let mut addr = mem::uninitialized();
-    let host_addr = if inet_aton(name, &mut addr) == 1 {
-        addr
-    } else {
-        // XXX
-        let mut host = lookup_host(str::from_utf8_unchecked(c_str(name))).unwrap();
-        host.next().ok_or( { platform::errno = ENOENT; return ptr::null() });
+    let mut host = match lookup_host(str::from_utf8_unchecked(c_str(name))) {
+        Ok(lookuphost) => lookuphost,
+        Err(e) => { platform::errno = e; return ptr::null() }
+    };
+    let host_addr = match host.next() {
+        Some(result) => result,
+        None => { platform::errno = ENOENT; return ptr::null() }
     };
 
     let host_name: Vec<u8> = c_str(name).to_vec();
@@ -529,6 +556,7 @@ pub unsafe extern "C" fn gethostbyname(name: *const c_char) -> *const hostent {
         h_length: 4,
         h_addr_list: HOST_ADDR_LIST.as_mut_ptr()
     };
+    sethostent(HOST_STAYOPEN);
     &HOST_ENTRY as *const hostent
 }
 
@@ -550,13 +578,7 @@ pub unsafe extern "C" fn gethostent() -> *const hostent {
             }
         };
     }
-    match rlb.next() {
-        Line::Some(s) => {},
-        _ => {
-            if HOST_STAYOPEN == 0 { endhostent(); }
-            return ptr::null();
-        }
-    }
+    rlb.next();
     H_POS = rlb.line_pos();
 
     let mut iter: SplitWhitespace = r.split_whitespace();
@@ -580,7 +602,7 @@ pub unsafe extern "C" fn gethostent() -> *const hostent {
     loop {
         let mut alias = match iter.next() {
             Some(s) => s.as_bytes().to_vec(),
-            None => break
+            _ => break
         };
         alias.push(b'\0');
         _host_aliases.push(alias);

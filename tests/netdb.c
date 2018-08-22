@@ -129,11 +129,11 @@ test_hosts (void)
           printf ("gethostbyname (\"LocalHost\")->%s\n", hptr2->h_name);
           ++error_count;
         }
-      // else
-      //   output_hostent ("gethostbyname(\"localhost\")", hptr1);
+       //else
+        //output_hostent ("gethostbyname(\"localhost\")", hptr1);
     }
   hptr1 = gethostbyname ("127.0.0.1");
-  // output_hostent ("gethostbyname (\"127.0.0.1\")", hptr1);
+  //output_hostent ("gethostbyname (\"127.0.0.1\")", hptr1);
   while (gethostname (name, namelen) < 0 && errno == ENAMETOOLONG)
     {
       namelen += 2;                /* tiny increments to test a lot */
@@ -141,11 +141,11 @@ test_hosts (void)
     }
   if (gethostname (name, namelen) == 0)
     {
-      // printf ("Hostname: %s\n", name);
+       //printf ("Hostname: %s\n", name);
       if (name != NULL)
         {
           hptr1 = gethostbyname (name);
-        //  output_hostent ("gethostbyname (gethostname(...))", hptr1);
+          //output_hostent ("gethostbyname (gethostname(...))", hptr1);
         }
     }
   ip.s_addr = htonl (INADDR_LOOPBACK);
@@ -153,16 +153,28 @@ test_hosts (void)
   hptr1 = gethostbyaddr ((char *) &ip, sizeof(ip), AF_INET);
   if (hptr1 != NULL)
     {
-    //  printf ("official name of 127.0.0.1: %s\n", hptr1->h_name);
+      //printf ("official name of 127.0.0.1: %s\n", hptr1->h_name);
     }
   sethostent (0);
   do
     {
       hptr1 = gethostent ();
-    //  output_hostent ("gethostent ()", hptr1);
+      //output_hostent ("gethostent ()", hptr1);
     }
   while (hptr1 != NULL);
   endhostent ();
+  struct hostent *redox = gethostbyname("redox-os.org");
+  if (redox == NULL) {
+      ++error_count;
+  }
+  //output_hostent("gethostbyname(\"redox-os.org\")", redox);
+  struct in_addr el_goog;
+  inet_aton("8.8.4.4", &el_goog);
+  struct hostent *google = gethostbyaddr(&el_goog, 4, AF_INET);
+  if (google == NULL) {
+      ++error_count;
+  }
+  //output_hostent("gethostbyaddr(\"8.8.4.4\")",google);
 }
 static void
 output_netent (const char *call, struct netent *nptr)
