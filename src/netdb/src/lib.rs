@@ -462,7 +462,6 @@ pub unsafe extern "C" fn gethostbyaddr(v: *const c_void, length: socklen_t, form
     _host_aliases.push(vec![b'\0']);
     let mut host_aliases: Vec<*mut i8> = Vec::new(); 
     host_aliases.push(ptr::null_mut());
-    host_aliases.push(ptr::null_mut());
     HOST_ALIASES = Some(_host_aliases);
 
 
@@ -617,7 +616,8 @@ pub unsafe extern "C" fn gethostent() -> *const hostent {
     }
     HOST_ALIASES = Some(_host_aliases);
 
-    let mut host_aliases: Vec<*mut i8> = _host_aliases.iter_mut().map(|x| x.as_mut_ptr() as *mut i8).collect();
+    let mut host_aliases: Vec<*mut i8> = HOST_ALIASES.as_mut().unwrap().iter_mut().map(|x| x.as_mut_ptr() as *mut i8).collect();
+    host_aliases.push(ptr::null_mut());
     host_aliases.push(ptr::null_mut());
 
     HOST_NAME = Some(host_name);
