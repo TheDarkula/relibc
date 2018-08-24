@@ -615,11 +615,12 @@ pub unsafe extern "C" fn gethostent() -> *const hostent {
         alias.push(b'\0');
         _host_aliases.push(alias);
     }
+    HOST_ALIASES = Some(_host_aliases);
+
     let mut host_aliases: Vec<*mut i8> = _host_aliases.iter_mut().map(|x| x.as_mut_ptr() as *mut i8).collect();
     host_aliases.push(ptr::null_mut());
 
     HOST_NAME = Some(host_name);
-    HOST_ALIASES = Some(_host_aliases);
 
     HOST_ENTRY = hostent {
         h_name: HOST_NAME.as_mut().unwrap().as_mut_ptr() as *mut c_char,
