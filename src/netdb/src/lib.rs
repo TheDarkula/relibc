@@ -635,22 +635,18 @@ pub unsafe extern "C" fn gethostent() -> *const hostent {
         &HOST_ENTRY as *const hostent
 }
 
-#[no_mangle]
 pub unsafe extern "C" fn getnetbyaddr(net: u32, net_type: c_int) -> *const netent {
     unimplemented!();
 }
 
-#[no_mangle]
 pub unsafe extern "C" fn getnetbyname(name: *const c_char) -> *const netent {
     unimplemented!();
 }
 
-#[no_mangle]
 pub unsafe extern "C" fn getnetent() -> *const netent {
     unimplemented!();
 }
 
-#[no_mangle]
 pub unsafe extern "C" fn getprotobyname(name: *const c_char) -> *const protoent {
     let mut p: *const protoent;
     setprotoent(PROTO_STAYOPEN);
@@ -922,7 +918,6 @@ pub unsafe extern "C" fn setservent(stayopen: c_int) {
     }
 }
 
-#[no_mangle]
 pub unsafe extern "C" fn getaddrinfo(
     node: *const c_char,
     service: *const c_char,
@@ -932,7 +927,6 @@ pub unsafe extern "C" fn getaddrinfo(
     unimplemented!();
 }
 
-#[no_mangle]
 pub unsafe extern "C" fn getnameinfo(
     addr: *const sockaddr,
     addrlen: socklen_t,
@@ -945,12 +939,10 @@ pub unsafe extern "C" fn getnameinfo(
     unimplemented!();
 }
 
-#[no_mangle]
 pub extern "C" fn freeaddrinfo(res: *mut addrinfo) {
     unimplemented!();
 }
 
-#[no_mangle]
 pub extern "C" fn gai_strerror(errcode: c_int) -> *const c_char {
     unimplemented!();
 }
