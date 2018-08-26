@@ -10,8 +10,8 @@ extern crate platform;
 
 use alloc::vec::Vec;
 use core::ptr;
-use platform::{Line, RawFile, RawLineBuffer};
 use platform::types::*;
+use platform::{Line, RawFile, RawLineBuffer};
 
 #[repr(C)]
 pub struct passwd {
@@ -21,7 +21,7 @@ pub struct passwd {
     pw_gid: gid_t,
     pw_gecos: *mut c_char,
     pw_dir: *mut c_char,
-    pw_shell: *mut c_char
+    pw_shell: *mut c_char,
 }
 
 static mut PASSWD_BUF: *mut c_char = ptr::null_mut();
@@ -32,23 +32,31 @@ static mut PASSWD: passwd = passwd {
     pw_gid: 0,
     pw_gecos: ptr::null_mut(),
     pw_dir: ptr::null_mut(),
-    pw_shell: ptr::null_mut()
+    pw_shell: ptr::null_mut(),
 };
 
 enum OptionPasswd {
     Error,
     NotFound,
-    Found(*mut c_char)
+    Found(*mut c_char),
 }
 
-fn pwd_lookup<F>(out: *mut passwd, alloc: Option<(*mut c_char, size_t)>, mut callback: F) -> OptionPasswd
-    where
-        // TODO F: FnMut(impl Iterator<Item = &[u8]>) -> bool
-        F: FnMut(&[&[u8]]) -> bool
+fn pwd_lookup<F>(
+    out: *mut passwd,
+    alloc: Option<(*mut c_char, size_t)>,
+    mut callback: F,
+) -> OptionPasswd
+where
+    // TODO F: FnMut(impl Iterator<Item = &[u8]>) -> bool
+    F: FnMut(&[&[u8]]) -> bool,
 {
-    let file = match RawFile::open("/etc/passwd\0".as_ptr() as *const c_char, fcntl::O_RDONLY, 0o644) {
+    let file = match RawFile::open(
+        "/etc/passwd\0".as_ptr() as *const c_char,
+        fcntl::O_RDONLY,
+        0,
+    ) {
         Ok(file) => file,
-        Err(_) => return OptionPasswd::Error
+        Err(_) => return OptionPasswd::Error,
     };
 
     let mut rlb = RawLineBuffer::new(*file);
@@ -72,7 +80,8 @@ fn pwd_lookup<F>(out: *mut passwd, alloc: Option<(*mut c_char, size_t)>, mut cal
             continue;
         }
 
-        let len = parts.iter()
+        let len = parts
+            .iter()
             .enumerate()
             .filter(|(i, _)| *i != 2 && *i != 3)
             .map(|(_, part)| part.len() + 1)
@@ -87,7 +96,7 @@ fn pwd_lookup<F>(out: *mut passwd, alloc: Option<(*mut c_char, size_t)>, mut cal
 
         let alloc = match alloc {
             Some((alloc, _)) => alloc,
-            None => unsafe { platform::alloc(len) as *mut c_char }
+            None => unsafe { platform::alloc(len) as *mut c_char },
         };
         // _ prefix so it won't complain about the trailing
         // _off += <thing>
@@ -115,14 +124,15 @@ fn pwd_lookup<F>(out: *mut passwd, alloc: Option<(*mut c_char, size_t)>, mut cal
                 }
                 _off += src.len() as isize + 1;
             };
-            ($entry:expr, parse) => {
+            ($entry:expr,parse) => {
                 unsafe {
-                    $entry = parts.next()
+                    $entry = parts
+                        .next()
                         .and_then(|part| core::str::from_utf8(part).ok())
                         .and_then(|part| part.parse().ok())
                         .unwrap_or(0);
                 }
-            }
+            };
         }
 
         copy_into!((*out).pw_name);
@@ -138,8 +148,13 @@ fn pwd_lookup<F>(out: *mut passwd, alloc: Option<(*mut c_char, size_t)>, mut cal
 }
 
 #[no_mangle]
-pub extern "C" fn getpwnam_r(name: *const c_char, out: *mut passwd, buf: *mut c_char,
-        size: size_t, result: *mut *mut passwd) -> c_int {
+pub extern "C" fn getpwnam_r(
+    name: *const c_char,
+    out: *mut passwd,
+    buf: *mut c_char,
+    size: size_t,
+    result: *mut *mut passwd,
+) -> c_int {
     match pwd_lookup(out, Some((buf, size)), |parts| {
         let part = parts.get(0).unwrap_or(&(&[] as &[u8]));
         for (i, c) in part.iter().enumerate() {
@@ -163,15 +178,21 @@ pub extern "C" fn getpwnam_r(name: *const c_char, out: *mut passwd, buf: *mut c_
         OptionPasswd::Found(_) => unsafe {
             *result = out;
             0
-        }
+        },
     }
 }
 
 #[no_mangle]
-pub extern "C" fn getpwuid_r(uid: uid_t, out: *mut passwd, buf: *mut c_char,
-        size: size_t, result: *mut *mut passwd) -> c_int {
+pub extern "C" fn getpwuid_r(
+    uid: uid_t,
+    out: *mut passwd,
+    buf: *mut c_char,
+    size: size_t,
+    result: *mut *mut passwd,
+) -> c_int {
     match pwd_lookup(out, Some((buf, size)), |parts| {
-        let part = parts.get(2)
+        let part = parts
+            .get(2)
             .and_then(|part| core::str::from_utf8(part).ok())
             .and_then(|part| part.parse().ok());
         part == Some(uid)
@@ -187,7 +208,7 @@ pub extern "C" fn getpwuid_r(uid: uid_t, out: *mut passwd, buf: *mut c_char,
         OptionPasswd::Found(_) => unsafe {
             *result = out;
             0
-        }
+        },
     }
 }
 
@@ -210,14 +231,15 @@ pub extern "C" fn getpwnam(name: *const c_char) -> *mut passwd {
         OptionPasswd::Found(buf) => unsafe {
             PASSWD_BUF = buf;
             &mut PASSWD
-        }
+        },
     }
 }
 
 #[no_mangle]
 pub extern "C" fn getpwuid(uid: uid_t) -> *mut passwd {
     match pwd_lookup(unsafe { &mut PASSWD }, None, |parts| {
-        let part = parts.get(2)
+        let part = parts
+            .get(2)
             .and_then(|part| core::str::from_utf8(part).ok())
             .and_then(|part| part.parse().ok());
         part == Some(uid)
@@ -230,6 +252,6 @@ pub extern "C" fn getpwuid(uid: uid_t) -> *mut passwd {
             }
             PASSWD_BUF = buf;
             &mut PASSWD
-        }
+        },
     }
 }

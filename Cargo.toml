@@ -21,6 +21,7 @@ errno = { path = "src/errno" }
 fcntl = { path = "src/fcntl" }
 fenv = { path = "src/fenv" }
 float = { path = "src/float" }
+fnmatch = { path = "src/fnmatch" }
 grp = { path = "src/grp" }
 inttypes = { path = "src/inttypes" }
 locale = { path = "src/locale" }
@@ -38,14 +39,18 @@ strings = { path = "src/strings" }
 sys_ioctl = { path = "src/sys_ioctl" }
 sys_mman = { path = "src/sys_mman" }
 sys_resource = { path = "src/sys_resource" }
+sys_select = { path = "src/sys_select" }
 sys_socket = { path = "src/sys_socket" }
 sys_stat = { path = "src/sys_stat" }
 sys_time = { path = "src/sys_time" }
+sys_times = { path = "src/sys_times" }
 sys_un = { path = "src/sys_un" }
 sys_utsname = { path = "src/sys_utsname" }
 sys_wait = { path = "src/sys_wait" }
+termios = { path = "src/termios" }
 time = { path = "src/time" }
 unistd = { path = "src/unistd" }
+utime = { path = "src/utime" }
 wchar = { path = "src/wchar" }
 wctype = { path = "src/wctype" }
 

@@ -142,6 +142,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "fnmatch"
+version = "0.1.0"
+dependencies = [
+ "cbindgen 0.5.2",
+ "platform 0.1.0",
+]
+
+[[package]]
 name = "fuchsia-zircon"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -253,8 +261,9 @@ name = "platform"
 version = "0.1.0"
 dependencies = [
  "ralloc 1.0.0",
- "redox_syscall 0.1.40 (registry+https://github.com/rust-lang/crates.io-index)",
+ "redox_syscall 0.1.40 (git+https://gitlab.redox-os.org/redox-os/syscall.git?branch=relibc)",
  "sc 0.2.2 (registry+https://github.com/rust-lang/crates.io-index)",
+ "spin 0.4.8 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -322,6 +331,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 [[package]]
 name = "redox_syscall"
 version = "0.1.40"
+source = "git+https://gitlab.redox-os.org/redox-os/syscall.git?branch=relibc#739aef47b8e6b300874945c3c33bb9550414b5b8"
+
+[[package]]
+name = "redox_syscall"
+version = "0.1.40"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
@@ -345,6 +359,7 @@ dependencies = [
  "fcntl 0.1.0",
  "fenv 0.1.0",
  "float 0.1.0",
+ "fnmatch 0.1.0",
  "grp 0.1.0",
  "inttypes 0.1.0",
  "locale 0.1.0",
@@ -362,14 +377,18 @@ dependencies = [
  "sys_ioctl 0.1.0",
  "sys_mman 0.1.0",
  "sys_resource 0.1.0",
+ "sys_select 0.1.0",
  "sys_socket 0.1.0",
  "sys_stat 0.1.0",
  "sys_time 0.1.0",
+ "sys_times 0.1.0",
  "sys_un 0.1.0",
  "sys_utsname 0.1.0",
  "sys_wait 0.1.0",
+ "termios 0.1.0",
  "time 0.1.0",
  "unistd 0.1.0",
+ "utime 0.1.0",
  "wchar 0.1.0",
  "wctype 0.1.0",
 ]
@@ -504,6 +523,7 @@ dependencies = [
  "cbindgen 0.5.2",
  "errno 0.1.0",
  "platform 0.1.0",
+ "signal 0.1.0",
 ]
 
 [[package]]
@@ -563,6 +583,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "sys_select"
+version = "0.1.0"
+dependencies = [
+ "cbindgen 0.5.2",
+ "platform 0.1.0",
+]
+
+[[package]]
 name = "sys_socket"
 version = "0.1.0"
 dependencies = [
@@ -580,6 +608,14 @@ dependencies = [
 
 [[package]]
 name = "sys_time"
+version = "0.1.0"
+dependencies = [
+ "cbindgen 0.5.2",
+ "platform 0.1.0",
+]
+
+[[package]]
+name = "sys_times"
 version = "0.1.0"
 dependencies = [
  "cbindgen 0.5.2",
@@ -629,6 +665,14 @@ dependencies = [
  "libc 0.2.42 (registry+https://github.com/rust-lang/crates.io-index)",
  "redox_syscall 0.1.40 (registry+https://github.com/rust-lang/crates.io-index)",
  "redox_termios 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
+name = "termios"
+version = "0.1.0"
+dependencies = [
+ "cbindgen 0.5.2",
+ "platform 0.1.0",
 ]
 
 [[package]]
@@ -686,6 +730,14 @@ dependencies = [
  "stdio 0.1.0",
  "string 0.1.0",
  "sys_time 0.1.0",
+]
+
+[[package]]
+name = "utime"
+version = "0.1.0"
+dependencies = [
+ "cbindgen 0.5.2",
+ "platform 0.1.0",
 ]
 
 [[package]]
@@ -767,6 +819,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 "checksum rand 0.4.2 (registry+https://github.com/rust-lang/crates.io-index)" = "eba5f8cb59cc50ed56be8880a5c7b496bfd9bd26394e176bc67884094145c2c5"
 "checksum rand 0.5.4 (registry+https://github.com/rust-lang/crates.io-index)" = "12397506224b2f93e6664ffc4f664b29be8208e5157d3d90b44f09b5fae470ea"
 "checksum rand_core 0.2.1 (registry+https://github.com/rust-lang/crates.io-index)" = "edecf0f94da5551fc9b492093e30b041a891657db7940ee221f9d2f66e82eef2"
+"checksum redox_syscall 0.1.40 (git+https://gitlab.redox-os.org/redox-os/syscall.git?branch=relibc)" = "<none>"
 "checksum redox_syscall 0.1.40 (registry+https://github.com/rust-lang/crates.io-index)" = "c214e91d3ecf43e9a4e41e578973adeb14b474f2bee858742d127af75a0112b1"
 "checksum redox_termios 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)" = "7e891cfe48e9100a70a3b6eb652fef28920c117d366339687bd5576160db0f76"
 "checksum remove_dir_all 0.5.1 (registry+https://github.com/rust-lang/crates.io-index)" = "3488ba1b9a2084d38645c4c08276a1752dcbf2c7130d74f1569681ad5d2799c5"

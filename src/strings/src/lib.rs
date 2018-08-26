@@ -140,9 +140,12 @@ pub unsafe extern "C" fn strncasecmp(
         }
 
         first = first.offset(1);
-        second = first.offset(1);
+        second = second.offset(1);
         n -= 1;
     }
-    // Both strings ended at the same time too
-    (n == 0 || *first == *second) as c_int
+    // Both strings didn't end with NUL bytes (unless we reached the limit)
+    if n != 0 && *first != *second {
+        return -1;
+    }
+    0
 }

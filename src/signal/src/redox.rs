@@ -1,24 +1,29 @@
 // Needs to be defined in assembly because it can't have a function prologue
 #[cfg(target_arch = "x86_64")]
-global_asm!("
+global_asm!(
+    "
     .global __restore_rt
     __restore_rt:
         mov $119, %rax # <- rax is register, 119 is SIGRETURN
         int $0x80
-");
+"
+);
 #[cfg(target_arch = "aarch64")]
-global_asm!("
+global_asm!(
+    "
     .global __restore_rt
     __restore_rt:
         mov x8, #119 # <- x8 is register, 119 is SIGRETURN
         svc 0
-");
+"
+);
 
 pub const SIGHUP: usize = 1;
 pub const SIGINT: usize = 2;
 pub const SIGQUIT: usize = 3;
 pub const SIGILL: usize = 4;
 pub const SIGTRAP: usize = 5;
+pub const SIGABRT: usize = 6;
 pub const SIGBUS: usize = 7;
 pub const SIGFPE: usize = 8;
 pub const SIGKILL: usize = 9;

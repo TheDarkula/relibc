@@ -6,5 +6,5 @@ authors = ["jD91mZM2 <me@krake.one>"]
 [build-dependencies]
 cbindgen = { path = "../../cbindgen" }
 
-[target.'cfg(target_os = "linux")'.dependencies]
+[dependencies]
 platform = { path = "../platform" }

@@ -2,18 +2,30 @@
 
 #![no_std]
 
+extern crate platform;
+
+use platform::types::*;
+
+// This is used from sgtty
+#[repr(C)]
+pub struct sgttyb {
+    sg_ispeed: c_char,
+    sg_ospeed: c_char,
+    sg_erase: c_char,
+    sg_kill: c_char,
+    sg_flags: c_ushort,
+}
+
 #[cfg(target_os = "linux")]
 pub mod inner {
-    extern crate platform;
-
-    use self::platform::types::*;
+    use *;
 
     #[repr(C)]
     pub struct winsize {
         ws_row: c_ushort,
         ws_col: c_ushort,
         ws_xpixel: c_ushort,
-        ws_ypixel: c_ushort
+        ws_ypixel: c_ushort,
     }
 
     #[no_mangle]
