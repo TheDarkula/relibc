@@ -5,6 +5,12 @@ use ::{Line, RawFile, RawLineBuffer};
 use errno;
 use types::*;
 
+const EINVAL: c_int = 22;
+
+const SIGCHLD: usize = 17;
+
+const TCGETS: c_ulong = 0x5401;
+const TCSETS: c_ulong = 0x5402;
 const TIOCGWINSZ: c_ulong = 0x5413;
 
 const AT_FDCWD: c_int = -100;
@@ -27,6 +33,10 @@ fn e(sys: usize) -> usize {
 
 pub unsafe fn accept(socket: c_int, address: *mut sockaddr, address_len: *mut socklen_t) -> c_int {
     e(syscall!(ACCEPT, socket, address, address_len)) as c_int
+}
+
+pub fn access(path: *const c_char, mode: c_int) -> c_int {
+    e(unsafe { syscall!(ACCESS, path, mode) }) as c_int
 }
 
 pub unsafe fn bind(socket: c_int, address: *const sockaddr, address_len: socklen_t) -> c_int {
@@ -88,6 +98,10 @@ pub fn fchown(fildes: c_int, owner: uid_t, group: gid_t) -> c_int {
     e(unsafe { syscall!(FCHOWN, fildes, owner, group) }) as c_int
 }
 
+pub fn flock(fd: c_int, operation: c_int) -> c_int {
+    e(unsafe { syscall!(FLOCK, fd, operation) }) as c_int
+}
+
 pub fn fstat(fildes: c_int, buf: *mut stat) -> c_int {
     let empty_cstr: *const c_char = unsafe { ::cstr_from_bytes_with_nul_unchecked(b"\0") };
     e(unsafe { syscall!(NEWFSTATAT, fildes, empty_cstr, buf, AT_EMPTY_PATH) }) as c_int
@@ -98,7 +112,7 @@ pub fn fcntl(fildes: c_int, cmd: c_int, arg: c_int) -> c_int {
 }
 
 pub fn fork() -> pid_t {
-    e(unsafe { syscall!(CLONE, 17, 0) }) as pid_t
+    e(unsafe { syscall!(CLONE, SIGCHLD, 0) }) as pid_t
 }
 
 pub fn fsync(fildes: c_int) -> c_int {
@@ -111,6 +125,10 @@ pub fn ftruncate(fildes: c_int, length: off_t) -> c_int {
 
 pub fn futimens(fd: c_int, times: *const timespec) -> c_int {
     e(unsafe { syscall!(UTIMENSAT, fd, ptr::null::<c_char>(), times, 0) }) as c_int
+}
+
+pub fn utimens(path: *const c_char, times: *const timespec) -> c_int {
+    e(unsafe { syscall!(UTIMENSAT, AT_FDCWD, path, times, 0) }) as c_int
 }
 
 pub fn getcwd(buf: *mut c_char, size: size_t) -> *mut c_char {
@@ -270,6 +288,21 @@ pub fn mkfifo(path: *const c_char, mode: mode_t) -> c_int {
     e(unsafe { syscall!(MKNODAT, AT_FDCWD, path, mode, 0) }) as c_int
 }
 
+pub unsafe fn mmap(
+    addr: *mut c_void,
+    len: usize,
+    prot: c_int,
+    flags: c_int,
+    fildes: c_int,
+    off: off_t,
+) -> *mut c_void {
+    e(syscall!(MMAP, addr, len, prot, flags, fildes, off)) as *mut c_void
+}
+
+pub unsafe fn munmap(addr: *mut c_void, len: usize) -> c_int {
+    e(syscall!(MUNMAP, addr, len)) as c_int
+}
+
 pub fn nanosleep(rqtp: *const timespec, rmtp: *mut timespec) -> c_int {
     e(unsafe { syscall!(NANOSLEEP, rqtp, rmtp) }) as c_int
 }
@@ -322,6 +355,16 @@ pub fn rename(old: *const c_char, new: *const c_char) -> c_int {
 
 pub fn rmdir(path: *const c_char) -> c_int {
     e(unsafe { syscall!(UNLINKAT, AT_FDCWD, path, AT_REMOVEDIR) }) as c_int
+}
+
+pub fn select(
+    nfds: c_int,
+    readfds: *mut fd_set,
+    writefds: *mut fd_set,
+    exceptfds: *mut fd_set,
+    timeout: *mut timeval,
+) -> c_int {
+    e(unsafe { syscall!(SELECT, nfds, readfds, writefds, exceptfds, timeout) }) as c_int
 }
 
 pub unsafe fn sendto(
@@ -377,7 +420,13 @@ pub fn shutdown(socket: c_int, how: c_int) -> c_int {
 }
 
 pub unsafe fn sigaction(sig: c_int, act: *const sigaction, oact: *mut sigaction) -> c_int {
-    e(syscall!(RT_SIGACTION, sig, act, oact, mem::size_of::<sigset_t>())) as c_int
+    e(syscall!(
+        RT_SIGACTION,
+        sig,
+        act,
+        oact,
+        mem::size_of::<sigset_t>()
+    )) as c_int
 }
 
 pub fn sigprocmask(how: c_int, set: *const sigset_t, oset: *mut sigset_t) -> c_int {
@@ -394,6 +443,29 @@ pub fn socket(domain: c_int, kind: c_int, protocol: c_int) -> c_int {
 
 pub fn socketpair(domain: c_int, kind: c_int, protocol: c_int, socket_vector: *mut c_int) -> c_int {
     e(unsafe { syscall!(SOCKETPAIR, domain, kind, protocol, socket_vector) }) as c_int
+}
+
+pub fn tcgetattr(fd: c_int, out: *mut termios) -> c_int {
+    ioctl(fd, TCGETS, out as *mut c_void)
+}
+
+pub fn tcsetattr(fd: c_int, act: c_int, value: *const termios) -> c_int {
+    if act < 0 || act > 2 {
+        unsafe {
+            errno = EINVAL;
+        }
+        return -1;
+    }
+    // This is safe because ioctl shouldn't modify the value
+    ioctl(fd, TCSETS + act as c_ulong, value as *mut c_void)
+}
+
+pub fn times(out: *mut tms) -> clock_t {
+    unsafe { syscall!(TIMES, out) as clock_t }
+}
+
+pub fn umask(mask: mode_t) -> mode_t {
+    unsafe { syscall!(UMASK, mask) as mode_t }
 }
 
 pub fn uname(utsname: *mut utsname) -> c_int {

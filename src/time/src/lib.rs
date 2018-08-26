@@ -3,7 +3,6 @@
 #![no_std]
 #![feature(alloc, const_fn)]
 
-#[macro_use]
 extern crate alloc;
 extern crate errno;
 extern crate platform;
@@ -287,7 +286,7 @@ pub unsafe extern "C" fn localtime_r(clock: *const time_t, t: *mut tm) -> *mut t
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn mktime(t: *const tm) -> time_t {
+pub unsafe extern "C" fn mktime(t: *mut tm) -> time_t {
     let mut year = (*t).tm_year + 1900;
     let mut month = (*t).tm_mon;
     let mut day = (*t).tm_mday as i64 - 1;
@@ -329,23 +328,29 @@ pub unsafe extern "C" fn mktime(t: *const tm) -> time_t {
 
 #[no_mangle]
 pub extern "C" fn nanosleep(rqtp: *const timespec, rmtp: *mut timespec) -> c_int {
-    platform::nanosleep(rqtp as *const platform::types::timespec, rmtp as *mut platform::types::timespec)
+    platform::nanosleep(
+        rqtp as *const platform::types::timespec,
+        rmtp as *mut platform::types::timespec,
+    )
 }
 
 #[no_mangle]
 pub unsafe extern "C" fn strftime(
     s: *mut c_char,
-    maxsize: usize,
+    maxsize: size_t,
     format: *const c_char,
     timeptr: *const tm,
 ) -> size_t {
-    strftime::strftime(
-        true,
-        &mut platform::UnsafeStringWriter(s as *mut u8),
-        maxsize,
+    let ret = strftime::strftime(
+        &mut platform::StringWriter(s as *mut u8, maxsize),
         format,
         timeptr,
-    )
+    );
+    if ret < maxsize {
+        return ret;
+    } else {
+        return 0;
+    }
 }
 
 // #[no_mangle]

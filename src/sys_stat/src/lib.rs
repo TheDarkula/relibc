@@ -6,13 +6,15 @@ extern crate platform;
 
 use platform::types::*;
 
-pub const S_IFMT:  c_int = 0o0170000;
-pub const S_IFBLK: c_int = 0o060000;
-pub const S_IFCHR: c_int = 0o020000;
-pub const S_IFIFO: c_int = 0o010000;
-pub const S_IFREG: c_int = 0o100000;
+pub const S_IFMT: c_int = 0o0170000;
+
 pub const S_IFDIR: c_int = 0o040000;
+pub const S_IFCHR: c_int = 0o020000;
+pub const S_IFBLK: c_int = 0o060000;
+pub const S_IFREG: c_int = 0o100000;
+pub const S_IFIFO: c_int = 0o010000;
 pub const S_IFLNK: c_int = 0o120000;
+pub const S_IFSOCK: c_int = 0o140000;
 
 pub const S_IRWXU: c_int = 0o0700;
 pub const S_IRUSR: c_int = 0o0400;
@@ -52,7 +54,7 @@ pub struct stat {
     // Compared to glibc, our struct is for some reason 24 bytes too small.
     // Accessing atime works, so clearly the struct isn't incorrect...
     // This works.
-    pub _pad: [c_char; 24]
+    pub _pad: [c_char; 24],
 }
 
 #[no_mangle]
@@ -105,9 +107,9 @@ pub extern "C" fn stat(file: *const c_char, buf: *mut platform::types::stat) -> 
     platform::stat(file, buf)
 }
 
-// #[no_mangle]
+#[no_mangle]
 pub extern "C" fn umask(mask: mode_t) -> mode_t {
-    unimplemented!();
+    platform::umask(mask)
 }
 
 /*

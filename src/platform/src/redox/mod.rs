@@ -1,9 +1,9 @@
 //! sys/socket implementation, following http://pubs.opengroup.org/onlinepubs/009696699/basedefs/sys/socket.h.html
 
+use alloc::btree_map::BTreeMap;
 use core::fmt::Write;
-use core::mem;
-use core::ptr;
-use core::slice;
+use core::{mem, ptr, slice};
+use spin::{Once, Mutex, MutexGuard};
 use syscall::data::Stat as redox_stat;
 use syscall::data::TimeSpec as redox_timespec;
 use syscall::flag::*;
@@ -15,9 +15,17 @@ use types::*;
 use *;
 
 pub const SEEK_SET: c_int = 0;
+const EINVAL: c_int = 22;
+const MAP_ANON: c_int = 1;
 
 #[thread_local]
 static mut SIG_HANDLER: Option<extern "C" fn(c_int)> = None;
+
+static ANONYMOUS_MAPS: Once<Mutex<BTreeMap<usize, usize>>> = Once::new();
+
+fn anonymous_maps() -> MutexGuard<'static, BTreeMap<usize, usize>> {
+    ANONYMOUS_MAPS.call_once(|| Mutex::new(BTreeMap::new())).lock()
+}
 
 extern "C" fn sig_handler(sig: usize) {
     if let Some(ref callback) = unsafe { SIG_HANDLER } {
@@ -86,6 +94,51 @@ pub unsafe fn accept(socket: c_int, address: *mut sockaddr, address_len: *mut so
     stream
 }
 
+pub fn access(path: *const c_char, mode: c_int) -> c_int {
+    let fd = match RawFile::open(path, 0, 0) {
+        Ok(fd) => fd,
+        Err(_) => return -1
+    };
+    if mode == F_OK {
+        return 0;
+    }
+
+    let mut stat = syscall::Stat::default();
+
+    if e(syscall::fstat(*fd as usize, &mut stat)) == !0 {
+        return -1;
+    }
+
+    let uid = e(syscall::getuid());
+    if uid == !0 {
+        return -1;
+    }
+    let gid = e(syscall::getgid());
+    if gid == !0 {
+        return -1;
+    }
+
+    let perms = if stat.st_uid as usize == uid {
+        // octal has max 7 characters, binary has max two. And we're interested
+        // in the 3rd digit
+        stat.st_mode >> ((7 / 2) * 2 & 0o7)
+    } else if stat.st_gid as usize == gid {
+        stat.st_mode >> ((7 / 2) & 0o7)
+    } else {
+        stat.st_mode & 0o7
+    };
+    if (mode & R_OK == R_OK && perms & 0o4 != 0o4)
+            || (mode & W_OK == W_OK && perms & 0o2 != 0o2)
+            || (mode & X_OK == X_OK && perms & 0o1 != 0o1) {
+        unsafe {
+            errno = EINVAL;
+        }
+        return -1;
+    }
+
+    0
+}
+
 pub unsafe fn bind(socket: c_int, address: *const sockaddr, address_len: socklen_t) -> c_int {
     bind_or_connect!(bind socket, address, address_len)
 }
@@ -146,67 +199,51 @@ pub fn exit(status: c_int) -> ! {
 
 pub unsafe extern "C" fn execve(
     path: *const c_char,
-    argv: *const *mut c_char,
-    envp: *const *mut c_char,
+    mut argv: *const *mut c_char,
+    mut envp: *const *mut c_char,
 ) -> c_int {
     use alloc::Vec;
-    use syscall::flag::*;
 
-    let mut env = envp;
-    while !(*env).is_null() {
-        let slice = c_str(*env);
-        // Should always contain a =, but worth checking
-        if let Some(sep) = slice.iter().position(|&c| c == b'=') {
-            // If the environment variable has no name, do not attempt
-            // to add it to the env.
-            if sep > 0 {
-                let mut path = b"env:".to_vec();
-                path.extend_from_slice(&slice[..sep]);
-                match syscall::open(&path, O_WRONLY | O_CREAT) {
-                    Ok(fd) => {
-                        // If the environment variable has no value, there
-                        // is no need to write anything to the env scheme.
-                        if sep + 1 < slice.len() {
-                            match syscall::write(fd, &slice[sep + 1..]) {
-                                Ok(_) => (),
-                                err => {
-                                    return e(err) as c_int;
-                                }
-                            }
-                        }
-                        // Cleanup after adding the variable.
-                        match syscall::close(fd) {
-                            Ok(_) => (),
-                            err => {
-                                return e(err) as c_int;
-                            }
-                        }
-                    }
-                    err => {
-                        return e(err) as c_int;
-                    }
-                }
-            }
-        }
-        env = env.offset(1);
-    }
+    let fd = match RawFile::open(path, O_RDONLY as c_int, 0) {
+        Ok(fd) => fd,
+        Err(_) => return -1
+    };
 
     let mut len = 0;
-    for i in 0.. {
-        if (*argv.offset(i)).is_null() {
-            len = i;
-            break;
-        }
+    while !(*argv.offset(len)).is_null() {
+        len += 1;
     }
 
     let mut args: Vec<[usize; 2]> = Vec::with_capacity(len as usize);
-    let mut arg = argv;
-    while !(*arg).is_null() {
-        args.push([*arg as usize, c_str(*arg).len()]);
-        arg = arg.offset(1);
+    while !(*argv).is_null() {
+        let arg = *argv;
+
+        let mut len = 0;
+        while *arg.offset(len) != 0 {
+            len += 1;
+        }
+        args.push([arg as usize, len as usize]);
+        argv = argv.offset(1);
     }
 
-    e(syscall::execve(c_str(path), &args)) as c_int
+    let mut len = 0;
+    while !(*envp.offset(len)).is_null() {
+        len += 1;
+    }
+
+    let mut envs: Vec<[usize; 2]> = Vec::with_capacity(len as usize);
+    while !(*envp).is_null() {
+        let env = *envp;
+
+        let mut len = 0;
+        while *env.offset(len) != 0 {
+            len += 1;
+        }
+        envs.push([env as usize, len as usize]);
+        envp = envp.offset(1);
+    }
+
+    e(syscall::fexec(*fd as usize, &args, &envs)) as c_int
 }
 
 pub fn fchdir(fd: c_int) -> c_int {
@@ -228,6 +265,11 @@ pub fn fchown(fd: c_int, owner: uid_t, group: gid_t) -> c_int {
 
 pub fn fcntl(fd: c_int, cmd: c_int, args: c_int) -> c_int {
     e(syscall::fcntl(fd as usize, cmd as usize, args as usize)) as c_int
+}
+
+pub fn flock(_fd: c_int, _operation: c_int) -> c_int {
+    // TODO: Redox does not have file locking yet
+    0
 }
 
 pub fn fork() -> pid_t {
@@ -252,15 +294,15 @@ pub fn fstat(fildes: c_int, buf: *mut stat) -> c_int {
                     (*buf).st_blksize = redox_buf.st_blksize as blksize_t;
                     (*buf).st_atim = timespec {
                         tv_sec: redox_buf.st_atime as time_t,
-                        tv_nsec: 0
+                        tv_nsec: redox_buf.st_atime_nsec as c_long,
                     };
                     (*buf).st_mtim = timespec {
                         tv_sec: redox_buf.st_mtime as time_t,
-                        tv_nsec: 0
+                        tv_nsec: redox_buf.st_mtime_nsec as c_long,
                     };
                     (*buf).st_ctim = timespec {
                         tv_sec: redox_buf.st_ctime as time_t,
-                        tv_nsec: 0
+                        tv_nsec: redox_buf.st_ctime_nsec as c_long,
                     };
                 }
             }
@@ -279,18 +321,33 @@ pub fn ftruncate(fd: c_int, len: off_t) -> c_int {
 }
 
 pub fn futimens(fd: c_int, times: *const timespec) -> c_int {
-    let times = [
-        unsafe { redox_timespec::from(&*times) },
-        unsafe { redox_timespec::from(&*times.offset(1)) }
-    ];
+    let times = [unsafe { redox_timespec::from(&*times) }, unsafe {
+        redox_timespec::from(&*times.offset(1))
+    }];
     e(syscall::futimens(fd as usize, &times)) as c_int
 }
 
+pub fn utimens(path: *const c_char, times: *const timespec) -> c_int {
+    let path = unsafe { c_str(path) };
+    match syscall::open(path, O_STAT) {
+        Err(err) => e(Err(err)) as c_int,
+        Ok(fd) => {
+            let res = futimens(fd as c_int, times);
+            let _ = syscall::close(fd);
+            res
+        }
+    }
+}
+
 pub fn getcwd(buf: *mut c_char, size: size_t) -> *mut c_char {
-    let buf_slice = unsafe { slice::from_raw_parts_mut(buf as *mut u8, size as usize) };
-    if e(syscall::getcwd(buf_slice)) == !0 {
+    let buf_slice = unsafe { slice::from_raw_parts_mut(buf as *mut u8, size as usize - 1) };
+    let read = e(syscall::getcwd(buf_slice));
+    if read == !0 {
         ptr::null_mut()
     } else {
+        unsafe {
+            *buf.offset(read as isize + 1) = 0;
+        }
         buf
     }
 }
@@ -311,7 +368,7 @@ pub fn getdents(fd: c_int, mut dirents: *mut dirent, mut bytes: usize) -> c_int 
             blen = match syscall::read(fd as usize, &mut buf) {
                 Ok(0) => return amount,
                 Ok(n) => n,
-                Err(err) => return -err.errno
+                Err(err) => return -err.errno,
             };
         }
 
@@ -324,7 +381,7 @@ pub fn getdents(fd: c_int, mut dirents: *mut dirent, mut bytes: usize) -> c_int 
                     d_off: 0,
                     d_reclen: mem::size_of::<dirent>() as c_ushort,
                     d_type: 0,
-                    d_name: name
+                    d_name: name,
                 };
                 dirents = dirents.offset(1);
             }
@@ -356,8 +413,8 @@ pub fn getgid() -> gid_t {
 }
 
 pub fn getrusage(who: c_int, r_usage: *mut rusage) -> c_int {
-    let _ = write!(
-        ::FileWriter(2),
+    let _ = writeln!(
+        FileWriter(2),
         "unimplemented: getrusage({}, {:p})",
         who,
         r_usage
@@ -372,11 +429,17 @@ pub unsafe fn gethostname(mut name: *mut c_char, len: size_t) -> c_int {
     }
     let mut reader = FileReader(fd);
     for _ in 0..len {
-        if !reader.read_u8(&mut *(name as *mut u8)) {
-            *name = 0;
-            break;
+        match reader.read_u8() {
+            Ok(Some(b)) => {
+                *name = b as c_char;
+                name = name.offset(1);
+            },
+            Ok(None) => {
+                *name = 0;
+                break;
+            },
+            Err(()) => return -1
         }
-        name = name.offset(1);
     }
     0
 }
@@ -416,8 +479,8 @@ unsafe fn inner_get_name(
 }
 
 pub fn getitimer(which: c_int, out: *mut itimerval) -> c_int {
-    let _ = write!(
-        ::FileWriter(2),
+    let _ = writeln!(
+        FileWriter(2),
         "unimplemented: getitimer({}, {:p})",
         which,
         out
@@ -464,8 +527,8 @@ pub fn getsockopt(
     option_value: *mut c_void,
     option_len: *mut socklen_t,
 ) -> c_int {
-    let _ = write!(
-        ::FileWriter(2),
+    let _ = writeln!(
+        FileWriter(2),
         "unimplemented: getsockopt({}, {}, {}, {:p}, {:p})",
         socket,
         level,
@@ -478,7 +541,10 @@ pub fn getsockopt(
 
 pub fn gettimeofday(tp: *mut timeval, tzp: *mut timezone) -> c_int {
     let mut redox_tp = redox_timespec::default();
-    let err = e(syscall::clock_gettime(syscall::CLOCK_REALTIME, &mut redox_tp)) as c_int;
+    let err = e(syscall::clock_gettime(
+        syscall::CLOCK_REALTIME,
+        &mut redox_tp,
+    )) as c_int;
     if err < 0 {
         return err;
     }
@@ -536,7 +602,7 @@ pub fn lseek(fd: c_int, offset: off_t, whence: c_int) -> off_t {
 
 pub fn lstat(path: *const c_char, buf: *mut stat) -> c_int {
     let path = unsafe { c_str(path) };
-    match syscall::open(path, O_RDONLY | O_NOFOLLOW) {
+    match syscall::open(path, O_STAT | O_NOFOLLOW) {
         Err(err) => e(Err(err)) as c_int,
         Ok(fd) => {
             let res = fstat(fd as i32, buf);
@@ -568,6 +634,43 @@ pub fn mkfifo(path: *const c_char, mode: mode_t) -> c_int {
         }
         Err(err) => e(Err(err)) as c_int,
     }
+}
+
+pub unsafe fn mmap(
+    _addr: *mut c_void,
+    len: usize,
+    _prot: c_int,
+    flags: c_int,
+    fildes: c_int,
+    off: off_t,
+) -> *mut c_void {
+    if flags & MAP_ANON == MAP_ANON {
+        let fd = e(syscall::open("memory:", 0)); // flags don't matter currently
+        if fd == !0 {
+            return !0 as *mut c_void;
+        }
+
+        let addr = e(syscall::fmap(fd, off as usize, len as usize));
+        if addr == !0 {
+            let _ = syscall::close(fd);
+            return !0 as *mut c_void;
+        }
+
+        anonymous_maps().insert(addr as usize, fd);
+        addr as *mut c_void
+    } else {
+        e(syscall::fmap(fildes as usize, off as usize, len as usize)) as *mut c_void
+    }
+}
+
+pub unsafe fn munmap(addr: *mut c_void, _len: usize) -> c_int {
+    if e(syscall::funmap(addr as usize)) == !0 {
+        return !0;
+    }
+    if let Some(fd) = anonymous_maps().remove(&(addr as usize)) {
+        let _ = syscall::close(fd);
+    }
+    0
 }
 
 pub fn nanosleep(rqtp: *const timespec, rmtp: *mut timespec) -> c_int {
@@ -651,6 +754,111 @@ pub fn rmdir(path: *const c_char) -> c_int {
     e(syscall::rmdir(path)) as c_int
 }
 
+pub fn select(
+    nfds: c_int,
+    readfds: *mut fd_set,
+    writefds: *mut fd_set,
+    exceptfds: *mut fd_set,
+    timeout: *mut timeval,
+) -> c_int {
+    fn isset(set: *mut fd_set, fd: usize) -> bool {
+        if set.is_null() {
+            return false;
+        }
+
+        let mask = 1 << (fd & (8 * mem::size_of::<c_ulong>() - 1));
+        unsafe { (*set).fds_bits[fd / (8 * mem::size_of::<c_ulong>())] & mask == mask }
+    }
+
+    let event_file = match RawFile::open("event:\0".as_ptr() as *const c_char, 0, 0) {
+        Ok(file) => file,
+        Err(_) => return -1,
+    };
+
+    let mut total = 0;
+
+    for fd in 0..nfds as usize {
+        macro_rules! register {
+            ($fd:expr, $flags:expr) => {
+                if write(
+                    *event_file,
+                    &syscall::Event {
+                        id: $fd,
+                        flags: $flags,
+                        data: 0,
+                    },
+                ) < 0
+                {
+                    return -1;
+                }
+            };
+        }
+        if isset(readfds, fd) {
+            register!(fd, syscall::EVENT_READ);
+            total += 1;
+        }
+        if isset(writefds, fd) {
+            register!(fd, syscall::EVENT_WRITE);
+            total += 1;
+        }
+        if isset(exceptfds, fd) {
+            total += 1;
+        }
+    }
+
+    const TIMEOUT_TOKEN: usize = 1;
+
+    let timeout_file = if timeout.is_null() {
+        None
+    } else {
+        let timeout_file = match RawFile::open(
+            format!("time:{}\0", syscall::CLOCK_MONOTONIC).as_ptr() as *const c_char,
+            0,
+            0,
+        ) {
+            Ok(file) => file,
+            Err(_) => return -1,
+        };
+        let timeout = unsafe { &*timeout };
+        if write(
+            *timeout_file,
+            &syscall::TimeSpec {
+                tv_sec: timeout.tv_sec,
+                tv_nsec: timeout.tv_usec * 1000,
+            },
+        ) < 0
+        {
+            return -1;
+        }
+        if write(
+            *event_file,
+            &syscall::Event {
+                id: *timeout_file as usize,
+                flags: syscall::EVENT_READ,
+                data: TIMEOUT_TOKEN,
+            },
+        ) < 0
+        {
+            return -1;
+        }
+
+        Some(timeout_file)
+    };
+
+    let mut event = syscall::Event::default();
+    if read(*event_file, &mut event) < 0 {
+        return -1;
+    }
+
+    if timeout_file.is_some() && event.data == TIMEOUT_TOKEN {
+        return 0;
+    }
+
+    // I really don't get why, but select wants me to return the total number
+    // of file descriptors that was inputted. I'm confused.
+    total
+}
+
 pub unsafe fn sendto(
     socket: c_int,
     buf: *const c_void,
@@ -671,8 +879,8 @@ pub unsafe fn sendto(
 }
 
 pub fn setitimer(which: c_int, new: *const itimerval, old: *mut itimerval) -> c_int {
-    let _ = write!(
-        ::FileWriter(2),
+    let _ = writeln!(
+        FileWriter(2),
         "unimplemented: setitimer({}, {:p}, {:p})",
         which,
         new,
@@ -704,8 +912,8 @@ pub fn setsockopt(
     option_value: *const c_void,
     option_len: socklen_t,
 ) -> c_int {
-    let _ = write!(
-        ::FileWriter(2),
+    let _ = writeln!(
+        FileWriter(2),
         "unimplemented: setsockopt({}, {}, {}, {:p}, {})",
         socket,
         level,
@@ -717,8 +925,8 @@ pub fn setsockopt(
 }
 
 pub fn shutdown(socket: c_int, how: c_int) -> c_int {
-    let _ = write!(
-        ::FileWriter(2),
+    let _ = writeln!(
+        FileWriter(2),
         "unimplemented: shutdown({}, {})",
         socket,
         how
@@ -729,26 +937,26 @@ pub fn shutdown(socket: c_int, how: c_int) -> c_int {
 pub unsafe fn sigaction(sig: c_int, act: *const sigaction, oact: *mut sigaction) -> c_int {
     if !oact.is_null() {
         // Assumes the last sigaction() call was made by relibc and not a different one
-        if let Some(callback) = SIG_HANDLER {
-            (*oact).sa_handler = callback;
+        if SIG_HANDLER.is_some() {
+            (*oact).sa_handler = SIG_HANDLER;
         }
     }
     let act = if act.is_null() {
         None
     } else {
-        SIG_HANDLER = Some((*act).sa_handler);
+        SIG_HANDLER = (*act).sa_handler;
         let m = (*act).sa_mask;
         Some(syscall::SigAction {
             sa_handler: sig_handler,
             sa_mask: [0, m as u64],
-            sa_flags: (*act).sa_flags as usize
+            sa_flags: (*act).sa_flags as usize,
         })
     };
     let mut old = syscall::SigAction::default();
     let ret = e(syscall::sigaction(
         sig as usize,
         act.as_ref(),
-        if oact.is_null() { None } else { Some(&mut old) }
+        if oact.is_null() { None } else { Some(&mut old) },
     )) as c_int;
     if !oact.is_null() {
         let m = old.sa_mask;
@@ -759,8 +967,8 @@ pub unsafe fn sigaction(sig: c_int, act: *const sigaction, oact: *mut sigaction)
 }
 
 pub fn sigprocmask(how: c_int, set: *const sigset_t, oset: *mut sigset_t) -> c_int {
-    let _ = write!(
-        ::FileWriter(2),
+    let _ = writeln!(
+        FileWriter(2),
         "unimplemented: sigprocmask({}, {:p}, {:p})",
         how,
         set,
@@ -771,7 +979,7 @@ pub fn sigprocmask(how: c_int, set: *const sigset_t, oset: *mut sigset_t) -> c_i
 
 pub fn stat(path: *const c_char, buf: *mut stat) -> c_int {
     let path = unsafe { c_str(path) };
-    match syscall::open(path, O_RDONLY) {
+    match syscall::open(path, O_STAT) {
         Err(err) => e(Err(err)) as c_int,
         Ok(fd) => {
             let res = fstat(fd as i32, buf);
@@ -814,8 +1022,8 @@ pub unsafe fn socket(domain: c_int, mut kind: c_int, protocol: c_int) -> c_int {
 }
 
 pub fn socketpair(domain: c_int, kind: c_int, protocol: c_int, socket_vector: *mut c_int) -> c_int {
-    let _ = write!(
-        ::FileWriter(2),
+    let _ = writeln!(
+        FileWriter(2),
         "unimplemented: socketpair({}, {}, {}, {:p})",
         domain,
         kind,
@@ -825,12 +1033,61 @@ pub fn socketpair(domain: c_int, kind: c_int, protocol: c_int, socket_vector: *m
     -1
 }
 
+pub fn tcgetattr(fd: c_int, out: *mut termios) -> c_int {
+    let dup = e(syscall::dup(fd as usize, b"termios"));
+    if dup == !0 {
+        return -1;
+    }
+
+    let read = e(syscall::read(dup, unsafe { slice::from_raw_parts_mut(
+        out as *mut u8,
+        mem::size_of::<termios>()
+    ) }));
+    let _ = syscall::close(dup);
+
+    if read == !0 {
+        return -1;
+    }
+    0
+}
+
+pub fn tcsetattr(fd: c_int, _act: c_int, value: *const termios) -> c_int {
+    let dup = e(syscall::dup(fd as usize, b"termios"));
+    if dup == !0 {
+        return -1;
+    }
+
+    let write = e(syscall::write(dup, unsafe { slice::from_raw_parts(
+        value as *const u8,
+        mem::size_of::<termios>()
+    ) }));
+    let _ = syscall::close(dup);
+
+    if write == !0 {
+        return -1;
+    }
+    0
+}
+
+pub fn times(out: *mut tms) -> clock_t {
+    let _ = writeln!(FileWriter(2), "unimplemented: times({:p})", out);
+    !0
+}
+
+pub fn umask(mask: mode_t) -> mode_t {
+    let _ = writeln!(FileWriter(2), "unimplemented: umask({})", mask);
+    0
+}
+
 pub fn unlink(path: *const c_char) -> c_int {
     let path = unsafe { c_str(path) };
     e(syscall::unlink(path)) as c_int
 }
 
-pub fn waitpid(pid: pid_t, stat_loc: *mut c_int, options: c_int) -> pid_t {
+pub fn waitpid(mut pid: pid_t, stat_loc: *mut c_int, options: c_int) -> pid_t {
+    if pid == !0 {
+        pid = 0;
+    }
     unsafe {
         let mut temp: usize = 0;
         let res = e(syscall::waitpid(pid as usize, &mut temp, options as usize));

@@ -20,10 +20,10 @@ mod brk;
 mod getopt;
 mod pathconf;
 
-pub const R_OK: c_int = 1;
+pub const F_OK: c_int = 0;
+pub const R_OK: c_int = 4;
 pub const W_OK: c_int = 2;
-pub const X_OK: c_int = 4;
-pub const F_OK: c_int = 8;
+pub const X_OK: c_int = 1;
 
 pub const SEEK_SET: c_int = 0;
 pub const SEEK_CUR: c_int = 1;
@@ -38,14 +38,16 @@ pub const STDIN_FILENO: c_int = 0;
 pub const STDOUT_FILENO: c_int = 1;
 pub const STDERR_FILENO: c_int = 2;
 
+const PATH_MAX: usize = 4096;
+
 #[no_mangle]
 pub extern "C" fn _exit(status: c_int) {
     platform::exit(status)
 }
 
-// #[no_mangle]
-pub extern "C" fn access(path: *const c_char, amode: c_int) -> c_int {
-    unimplemented!();
+#[no_mangle]
+pub extern "C" fn access(path: *const c_char, mode: c_int) -> c_int {
+    platform::access(path, mode)
 }
 
 #[no_mangle]
@@ -53,7 +55,7 @@ pub extern "C" fn alarm(seconds: c_uint) -> c_uint {
     let mut timer = sys_time::itimerval {
         it_value: sys_time::timeval {
             tv_sec: seconds as time_t,
-            tv_usec: 0
+            tv_usec: 0,
         },
         ..Default::default()
     };
@@ -184,8 +186,31 @@ pub extern "C" fn ftruncate(fildes: c_int, length: off_t) -> c_int {
 }
 
 #[no_mangle]
-pub extern "C" fn getcwd(buf: *mut c_char, size: size_t) -> *mut c_char {
-    platform::getcwd(buf, size)
+pub extern "C" fn getcwd(mut buf: *mut c_char, mut size: size_t) -> *mut c_char {
+    let alloc = buf.is_null();
+    let mut stack_buf = [0; PATH_MAX];
+    if alloc {
+        buf = stack_buf.as_mut_ptr();
+        size = stack_buf.len();
+    }
+
+    let ret = platform::getcwd(buf, size);
+    if ret == ptr::null_mut() {
+        return ptr::null_mut();
+    }
+
+    if alloc {
+        let mut len = stack_buf.iter().position(|b| *b == 0).expect("no nul-byte in getcwd string") + 1;
+        let mut heap_buf = unsafe { platform::alloc(len) as *mut c_char };
+        for i in 0..len {
+            unsafe {
+                *heap_buf.offset(i as isize) = stack_buf[i];
+            }
+        }
+        heap_buf
+    } else {
+        ret
+    }
 }
 
 // #[no_mangle]
@@ -275,7 +300,7 @@ pub extern "C" fn getuid() -> uid_t {
 
 #[no_mangle]
 pub extern "C" fn getwd(path_name: *mut c_char) -> *mut c_char {
-    getcwd(path_name, 4096 /* PATH_MAX */)
+    getcwd(path_name, PATH_MAX)
 }
 
 #[no_mangle]
@@ -455,12 +480,12 @@ pub extern "C" fn ualarm(value: useconds_t, interval: useconds_t) -> useconds_t 
     let mut timer = sys_time::itimerval {
         it_value: sys_time::timeval {
             tv_sec: 0,
-            tv_usec: value as suseconds_t
+            tv_usec: value as suseconds_t,
         },
         it_interval: sys_time::timeval {
             tv_sec: 0,
-            tv_usec: interval as suseconds_t
-        }
+            tv_usec: interval as suseconds_t,
+        },
     };
     let errno_backup = unsafe { platform::errno };
     let usecs = if sys_time::setitimer(sys_time::ITIMER_REAL, &timer, &mut timer) < 0 {

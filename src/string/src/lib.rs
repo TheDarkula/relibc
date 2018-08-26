@@ -3,6 +3,7 @@
 
 extern crate errno;
 extern crate platform;
+extern crate signal;
 
 use core::cmp;
 use core::mem;
@@ -149,36 +150,54 @@ pub unsafe extern "C" fn strcoll(s1: *const c_char, s2: *const c_char) -> c_int 
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn strcpy(s1: *mut c_char, s2: *const c_char) -> *mut c_char {
-    strncpy(s1, s2, usize::MAX)
+pub unsafe extern "C" fn strcpy(dst: *mut c_char, src: *const c_char) -> *mut c_char {
+    let mut i = 0;
+
+    loop {
+        let byte = *src.offset(i);
+        *dst.offset(i) = byte;
+
+        if byte == 0 {
+            break;
+        }
+
+        i += 1;
+    }
+
+    dst
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn strcspn(s1: *const c_char, s2: *const c_char) -> size_t {
+pub unsafe fn inner_strspn(s1: *const c_char, s2: *const c_char, cmp: bool) -> size_t {
     let s1 = s1 as *const u8;
     let s2 = s2 as *const u8;
 
-    // The below logic is effectively ripped from the musl implementation
+    // The below logic is effectively ripped from the musl implementation. It
+    // works by placing each byte as it's own bit in an array of numbers. Each
+    // number can hold up to 8 * mem::size_of::<usize>() bits. We need 256 bits
+    // in total, to fit one byte.
 
-    let mut byteset = [0usize; 32 / mem::size_of::<usize>()];
+    const BITSIZE: usize = 8 * mem::size_of::<usize>();
+    let mut byteset = [0usize; 256 / BITSIZE];
 
     let mut i = 0;
     while *s2.offset(i) != 0 {
-        byteset[(*s2.offset(i) as usize) / (8 * byteset.len())] |=
-            1 << (*s2.offset(i) as usize % (8 * byteset.len()));
+        byteset[(*s2.offset(i) as usize) / BITSIZE] |=
+            1 << (*s2.offset(i) as usize & (BITSIZE-1));
         i += 1;
     }
 
     i = 0; // reset
-    while *s1.offset(i) != 0 {
-        if byteset[(*s1.offset(i) as usize) / (8 * byteset.len())]
-            & 1 << (*s1.offset(i) as usize % (8 * byteset.len())) > 0
-        {
-            break;
-        }
+    while *s1.offset(i) != 0 &&
+            (byteset[(*s1.offset(i) as usize) / BITSIZE] &
+            1 << (*s1.offset(i) as usize & (BITSIZE-1)) != 0) == cmp {
         i += 1;
     }
     i as size_t
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn strcspn(s1: *const c_char, s2: *const c_char) -> size_t {
+    inner_strspn(s1, s2, false)
 }
 
 #[no_mangle]
@@ -264,24 +283,19 @@ pub unsafe extern "C" fn strncmp(s1: *const c_char, s2: *const c_char, n: usize)
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn strncpy(s1: *mut c_char, s2: *const c_char, n: usize) -> *mut c_char {
-    let s2_slice = platform::c_str_n(s2, n);
-    let s2_len = s2_slice.len();
+pub unsafe extern "C" fn strncpy(dst: *mut c_char, src: *const c_char, n: usize) -> *mut c_char {
+    let mut i = 0;
 
-    //memcpy(s1 as *mut _, s2 as *const _, cmp::min(n, s2_len));
-    let mut idx = 0;
-    for _ in 0..cmp::min(n, s2_len) {
-        *s1.offset(idx as isize) = s2_slice[idx] as c_char;
-        idx += 1;
+    while *src.offset(i) != 0 && (i as usize) < n {
+        *dst.offset(i) = *src.offset(i);
+        i += 1;
     }
 
-    // if length of s2 < n, pad s1 with zeroes
-    while idx < s2_len {
-        *s1.offset(idx as isize) = 0;
-        idx += 1;
+    for i in i..n as isize {
+        *dst.offset(i) = 0;
     }
 
-    s1
+    dst
 }
 
 #[no_mangle]
@@ -309,31 +323,15 @@ pub unsafe extern "C" fn strrchr(s: *const c_char, c: c_int) -> *mut c_char {
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn strsignal(sig: c_int) -> *mut c_char {
+    // Mutating this is undefined behavior I believe. But I just can't create a
+    // &'static mut str. Alternative is allocating everything on the heap...
+    signal::_signal_strings[sig as usize].as_ptr() as *const c_char as *mut c_char
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn strspn(s1: *const c_char, s2: *const c_char) -> size_t {
-    let s1 = s1 as *const u8;
-    let s2 = s2 as *const u8;
-
-    // The below logic is effectively ripped from the musl implementation
-
-    let mut byteset = [0usize; 32 / mem::size_of::<usize>()];
-
-    let mut i = 0;
-    while *s2.offset(i) != 0 {
-        byteset[(*s2.offset(i) as usize) / (8 * byteset.len())] |=
-            1 << (*s2.offset(i) as usize % (8 * byteset.len()));
-        i += 1;
-    }
-
-    i = 0; // reset
-    while *s1.offset(i) != 0 {
-        if byteset[(*s1.offset(i) as usize) / (8 * byteset.len())]
-            & 1 << (*s1.offset(i) as usize % (8 * byteset.len())) < 1
-        {
-            break;
-        }
-        i += 1;
-    }
-    i as size_t
+    inner_strspn(s1, s2, true)
 }
 
 #[no_mangle]

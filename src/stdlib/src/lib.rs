@@ -75,11 +75,7 @@ pub unsafe extern "C" fn abort() {
 
 #[no_mangle]
 pub extern "C" fn abs(i: c_int) -> c_int {
-    if i < 0 {
-        -i
-    } else {
-        i
-    }
+    i.abs()
 }
 
 #[no_mangle]
@@ -262,7 +258,7 @@ pub extern "C" fn gcvt(value: c_double, ndigit: c_int, buf: *mut c_char) -> *mut
     unimplemented!();
 }
 
-unsafe fn find_env(name: *const c_char) -> Option<(usize, *mut c_char)> {
+unsafe fn find_env(search: *const c_char) -> Option<(usize, *mut c_char)> {
     for (i, item) in platform::inner_environ.iter().enumerate() {
         let mut item = *item;
         if item == ptr::null_mut() {
@@ -273,23 +269,25 @@ unsafe fn find_env(name: *const c_char) -> Option<(usize, *mut c_char)> {
             );
             break;
         }
-        let mut name = name;
+        let mut search = search;
         loop {
-            let end_of_name = *name == 0 || *name == b'=' as c_char;
-            if *item == 0 || *item == b'=' as c_char || end_of_name {
-                if *item == b'=' as c_char || end_of_name {
+            let end_of_query = *search == 0 || *search == b'=' as c_char;
+            assert_ne!(*item, 0, "environ has an item without value");
+            if *item == b'=' as c_char || end_of_query {
+                if *item == b'=' as c_char && end_of_query {
+                    // Both keys env here
                     return Some((i, item.offset(1)));
                 } else {
                     break;
                 }
             }
 
-            if *item != *name {
+            if *item != *search {
                 break;
             }
 
             item = item.offset(1);
-            name = name.offset(1);
+            search = search.offset(1);
         }
     }
     None
@@ -331,11 +329,7 @@ pub extern "C" fn l64a(value: c_long) -> *mut c_char {
 
 #[no_mangle]
 pub extern "C" fn labs(i: c_long) -> c_long {
-    if i < 0 {
-        -i
-    } else {
-        i
-    }
+    i.abs()
 }
 
 // #[no_mangle]
@@ -360,6 +354,11 @@ pub extern "C" fn ldiv(numer: c_long, denom: c_long) -> ldiv_t {
 // #[no_mangle]
 pub extern "C" fn lrand48() -> c_long {
     unimplemented!();
+}
+
+#[no_mangle]
+pub extern "C" fn llabs(i: c_longlong) -> c_longlong {
+    i.abs()
 }
 
 #[no_mangle]
@@ -516,43 +515,17 @@ pub extern "C" fn ptsname(fildes: c_int) -> *mut c_char {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn putenv(s: *mut c_char) -> c_int {
-    let mut s_len = 0;
-    while *s.offset(s_len) != 0 {
-        s_len += 1;
-    }
-
-    let ptr;
-
-    if let Some((i, _)) = find_env(s) {
-        let mut item = platform::inner_environ[i];
-        let mut item_len = 0;
-        while *item.offset(item_len) != 0 {
-            item_len += 1;
-        }
-
-        if item_len > s_len {
-            ptr = item;
-        } else {
-            platform::free(item as *mut c_void);
-            ptr = platform::alloc(s_len as usize + 1) as *mut c_char;
-            platform::inner_environ[i] = ptr;
-        }
+pub unsafe extern "C" fn putenv(insert: *mut c_char) -> c_int {
+    assert_ne!(insert, ptr::null_mut(), "putenv(NULL)");
+    if let Some((i, _)) = find_env(insert) {
+        platform::free(platform::inner_environ[i] as *mut c_void);
+        platform::inner_environ[i] = insert;
     } else {
-        ptr = platform::alloc(s_len as usize + 1) as *mut c_char;
         let i = platform::inner_environ.len() - 1;
-        assert_eq!(
-            platform::inner_environ[i],
-            ptr::null_mut(),
-            "last element in environ vector was not null"
-        );
-        platform::inner_environ[i] = ptr;
+        assert_eq!(platform::inner_environ[i], ptr::null_mut(), "environ did not end with null");
+        platform::inner_environ[i] = insert;
         platform::inner_environ.push(ptr::null_mut());
-
         platform::environ = platform::inner_environ.as_mut_ptr();
-    }
-    for i in 0..=s_len {
-        *ptr.offset(i) = *s.offset(i);
     }
     0
 }
@@ -612,6 +585,65 @@ pub extern "C" fn seed48(seed16v: [c_ushort; 3]) -> c_ushort {
     unimplemented!();
 }
 
+#[no_mangle]
+pub unsafe extern "C" fn setenv(mut key: *const c_char, mut value: *const c_char, overwrite: c_int) -> c_int {
+    let mut key_len = 0;
+    while *key.offset(key_len) != 0 {
+        key_len += 1;
+    }
+    let mut value_len = 0;
+    while *value.offset(value_len) != 0 {
+        value_len += 1;
+    }
+
+    let index = if let Some((i, existing)) = find_env(key) {
+        if overwrite == 0 {
+            return 0;
+        }
+
+        let mut existing_len = 0;
+        while *existing.offset(existing_len) != 0 {
+            existing_len += 1;
+        }
+
+        if existing_len >= value_len {
+            // Reuse existing element's allocation
+            for i in 0..=value_len {
+                *existing.offset(i) = *value.offset(i);
+            }
+            return 0;
+        } else {
+            i
+        }
+    } else {
+        let i = platform::inner_environ.len() - 1;
+        assert_eq!(platform::inner_environ[i], ptr::null_mut(), "environ did not end with null");
+        platform::inner_environ.push(ptr::null_mut());
+        platform::environ = platform::inner_environ.as_mut_ptr();
+        i
+    };
+
+    //platform::free(platform::inner_environ[index] as *mut c_void);
+    let mut ptr = platform::alloc(key_len as usize + 1 + value_len as usize) as *mut c_char;
+    platform::inner_environ[index] = ptr;
+
+    while *key != 0 {
+        *ptr = *key;
+        ptr = ptr.offset(1);
+        key = key.offset(1);
+    }
+    *ptr = b'=' as c_char;
+    ptr = ptr.offset(1);
+    while *value != 0 {
+        *ptr = *value;
+        ptr = ptr.offset(1);
+        value = value.offset(1);
+    }
+    *ptr = 0;
+
+    0
+}
+
 // #[no_mangle]
 pub extern "C" fn setkey(key: *const c_char) {
     unimplemented!();
@@ -638,18 +670,54 @@ pub extern "C" fn srandom(seed: c_uint) {
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn strtod(s: *const c_char, endptr: *mut *mut c_char) -> c_double {
-    // TODO: endptr
+pub unsafe extern "C" fn strtod(mut s: *const c_char, endptr: *mut *mut c_char) -> c_double {
+    while ctype::isspace(*s as c_int) != 0 {
+        s = s.offset(1);
+    }
 
-    use core::str::FromStr;
+    let mut result = 0.0;
+    let mut radix = 10;
 
-    let s_str = str::from_utf8_unchecked(platform::c_str(s));
-    match f64::from_str(s_str) {
-        Ok(ok) => ok as c_double,
-        Err(_err) => {
-            platform::errno = EINVAL;
-            0.0
+    let negative = match *s as u8 {
+        b'-' => { s = s.offset(1); true },
+        b'+' => { s = s.offset(1); false },
+        _ => false
+    };
+
+    if *s as u8 == b'0' && *s.offset(1) as u8 == b'x' {
+        s = s.offset(2);
+        radix = 16;
+    }
+
+    while let Some(digit) = (*s as u8 as char).to_digit(radix) {
+        result *= radix as c_double;
+        result += digit as c_double;
+        s = s.offset(1);
+    }
+
+    if *s as u8 == b'.' {
+        s = s.offset(1);
+
+        let mut i = 1.0;
+        while let Some(digit) = (*s as u8 as char).to_digit(radix) {
+            i *= radix as c_double;
+            result += digit as c_double / i;
+            s = s.offset(1);
         }
+    }
+
+    if !endptr.is_null() {
+        // This is stupid, but apparently strto* functions want
+        // const input but mut output, yet the man page says
+        // "stores the address of the first invalid character in *endptr"
+        // so obviously it doesn't want us to clone it.
+        *endptr = s as *mut _;
+    }
+
+    if negative {
+        -result
+    } else {
+        result
     }
 }
 
@@ -731,7 +799,10 @@ pub fn convert_integer(s: *const c_char, base: c_int) -> Option<(c_ulong, isize,
     let mut overflowed = false;
 
     loop {
-        let val = unsafe { LOOKUP_TABLE[*s.offset(idx) as usize] };
+        // `-1 as usize` is usize::MAX
+        // `-1 as u8 as usize` is u8::MAX
+        // It extends by the sign bit unless we cast it to unsigned first.
+        let val = unsafe { LOOKUP_TABLE[*s.offset(idx) as u8 as usize] };
         if val == -1 || val as c_int >= base {
             break;
         } else {
@@ -894,6 +965,20 @@ pub unsafe extern "C" fn strtol(s: *const c_char, endptr: *mut *mut c_char, base
 }
 
 #[no_mangle]
+pub unsafe extern "C" fn strtoull(
+    s: *const c_char,
+    endptr: *mut *mut c_char,
+    base: c_int,
+) -> c_ulong {
+    strtoul(s, endptr, base)
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn strtoll(s: *const c_char, endptr: *mut *mut c_char, base: c_int) -> c_long {
+    strtol(s, endptr, base)
+}
+
+#[no_mangle]
 pub unsafe extern "C" fn system(command: *const c_char) -> c_int {
     let child_pid = unistd::fork();
     if child_pid == 0 {
@@ -935,6 +1020,16 @@ pub extern "C" fn ttyslot() -> c_int {
 // #[no_mangle]
 pub extern "C" fn unlockpt(fildes: c_int) -> c_int {
     unimplemented!();
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn unsetenv(key: *const c_char) -> c_int {
+    if let Some((i, _)) = find_env(key) {
+        // No need to worry about updating the pointer, this does not
+        // reallocate in any way. And the final null is already shifted back.
+        platform::inner_environ.remove(i);
+    }
+    0
 }
 
 #[no_mangle]

@@ -16,9 +16,9 @@ extern crate string;
 extern crate va_list as vl;
 
 use core::fmt::Write as WriteFmt;
-use core::fmt::{self, Error, Result};
+use core::fmt::{self, Error};
 use core::sync::atomic::{AtomicBool, Ordering};
-use core::{mem, ptr, str};
+use core::{ptr, str};
 
 use alloc::vec::Vec;
 use errno::STR_ERROR;
@@ -74,7 +74,11 @@ impl FILE {
             self.flags |= constants::F_ERR;
             return false;
         }
-        self.read = Some((self.buf.len() - 1, self.buf.len() - 1));
+        self.read = if self.buf.len() == 0 {
+            Some((0, 0))
+        } else {
+            Some((self.buf.len() - 1, self.buf.len() - 1))
+        };
         if self.flags & constants::F_EOF > 0 {
             false
         } else {
@@ -99,7 +103,11 @@ impl FILE {
             return true;
         }
         self.read = None;
-        self.write = Some((self.unget, self.unget, self.buf.len() - 1));
+        self.write = if self.buf.len() == 0 {
+            Some((0, 0, 0))
+        } else {
+            Some((self.unget, self.unget, self.buf.len() - 1))
+        };
         return true;
     }
     pub fn write(&mut self, to_write: &[u8]) -> usize {
@@ -116,7 +124,11 @@ impl FILE {
                     platform::write(self.fd, &f_buf[advance..]) + platform::write(self.fd, to_write)
                 };
                 if count == rem as isize {
-                    self.write = Some((self.unget, self.unget, self.buf.len() - 1));
+                    self.write = if self.buf.len() == 0 {
+                        Some((0, 0, 0))
+                    } else {
+                        Some((self.unget, self.unget, self.buf.len() - 1))
+                    };
                     return to_write.len();
                 }
                 if count < 0 {
@@ -143,7 +155,7 @@ impl FILE {
     pub fn read(&mut self, buf: &mut [u8]) -> usize {
         let adj = if self.buf.len() > 0 { 0 } else { 1 };
         let mut file_buf = &mut self.buf[self.unget..];
-        let count = if buf.len() <= 1 + adj {
+        let count = if buf.len() <= 1 - adj {
             platform::read(self.fd, &mut file_buf)
         } else {
             platform::read(self.fd, buf) + platform::read(self.fd, &mut file_buf)
@@ -160,7 +172,9 @@ impl FILE {
             return count as usize;
         }
         // Adjust pointers
-        if buf.len() > 0 {
+        if file_buf.len() == 0 {
+            self.read = Some((0, 0));
+        } else if buf.len() > 0 {
             self.read = Some((self.unget + 1, self.unget + (count as usize)));
             buf[buf.len() - 1] = file_buf[0];
         } else {
@@ -171,38 +185,52 @@ impl FILE {
     pub fn seek(&self, off: off_t, whence: c_int) -> off_t {
         platform::lseek(self.fd, off, whence)
     }
+
+    pub fn lock(&mut self) -> LockGuard {
+        flockfile(self);
+        LockGuard(self)
+    }
 }
-impl fmt::Write for FILE {
-    fn write_str(&mut self, s: &str) -> Result {
-        if !self.can_write() {
+
+pub struct LockGuard<'a>(&'a mut FILE);
+impl<'a> Drop for LockGuard<'a> {
+    fn drop(&mut self) {
+        funlockfile(self.0);
+    }
+}
+
+impl<'a> fmt::Write for LockGuard<'a> {
+    fn write_str(&mut self, s: &str) -> fmt::Result {
+        if !self.0.can_write() {
             return Err(Error);
         }
         let s = s.as_bytes();
-        if self.write(s) != s.len() {
+        if self.0.write(s) != s.len() {
             Err(Error)
         } else {
             Ok(())
         }
     }
 }
-impl Write for FILE {
-    fn write_u8(&mut self, byte: u8) -> Result {
-        if !self.can_write() {
+impl<'a> Write for LockGuard<'a> {
+    fn write_u8(&mut self, byte: u8) -> fmt::Result {
+        if !self.0.can_write() {
             return Err(Error);
         }
-        if self.write(&[byte]) != 1 {
+        if self.0.write(&[byte]) != 1 {
             Err(Error)
         } else {
             Ok(())
         }
     }
 }
-impl Read for FILE {
-    fn read_u8(&mut self, byte: &mut u8) -> bool {
-        let mut buf = [*byte];
-        let n = self.read(&mut buf);
-        *byte = buf[0];
-        n > 0
+impl<'a> Read for LockGuard<'a> {
+    fn read_u8(&mut self) -> Result<Option<u8>, ()> {
+        let mut buf = [0];
+        match self.0.read(&mut buf) {
+            0 => Ok(None),
+            _ => Ok(Some(buf[0]))
+        }
     }
 }
 
@@ -321,7 +349,7 @@ pub extern "C" fn fgetpos(stream: &mut FILE, pos: Option<&mut fpos_t>) -> c_int 
 pub extern "C" fn fgets(s: *mut c_char, n: c_int, stream: &mut FILE) -> *mut c_char {
     use core::slice;
     flockfile(stream);
-    let st = unsafe { slice::from_raw_parts_mut(s, n as usize) };
+    let st = unsafe { slice::from_raw_parts_mut(s as *mut u8, n as usize) };
 
     let mut len = n;
 
@@ -350,14 +378,18 @@ pub extern "C" fn fgets(s: *mut c_char, n: c_int, stream: &mut FILE) -> *mut c_c
             let mut idiff = 0usize;
             for _ in (0..(len - 1) as usize).take_while(|x| rpos + x < rend) {
                 let pos = (n - len) as usize;
-                st[pos] = stream.buf[rpos + idiff] as i8;
+                st[pos] = stream.buf[rpos + idiff];
                 idiff += 1;
                 len -= 1;
-                if st[pos] == b'\n' as i8 || st[pos] == stream.buf_char {
+                if st[pos] == b'\n' || st[pos] as i8 == stream.buf_char {
                     break 'outer;
                 }
             }
             stream.read = Some((rpos + idiff, rend));
+            if rend - rpos == 0 {
+                len -= stream.read(&mut st[((n - len) as usize)..]) as i32;
+                break;
+            }
             if len <= 1 {
                 break;
             }
@@ -834,6 +866,12 @@ pub extern "C" fn setvbuf(stream: &mut FILE, buf: *mut c_char, mode: c_int, size
         if mode != _IONBF {
             vec![0u8; 1]
         } else {
+            stream.unget = 0;
+            if let Some(_) = stream.write {
+                stream.write = Some((0, 0, 0));
+            } else if let Some(_) = stream.read {
+                stream.read = Some((0, 0));
+            }
             Vec::new()
         }
     } else {
@@ -913,7 +951,7 @@ pub extern "C" fn ungetc(c: c_int, stream: &mut FILE) -> c_int {
 
 #[no_mangle]
 pub unsafe extern "C" fn vfprintf(file: &mut FILE, format: *const c_char, ap: va_list) -> c_int {
-    printf::printf(file, format, ap)
+    printf::printf(file.lock(), format, ap)
 }
 
 #[no_mangle]
@@ -942,7 +980,7 @@ pub unsafe extern "C" fn vsprintf(s: *mut c_char, format: *const c_char, ap: va_
 
 #[no_mangle]
 pub unsafe extern "C" fn vfscanf(file: &mut FILE, format: *const c_char, ap: va_list) -> c_int {
-    scanf::scanf(file, format, ap)
+    scanf::scanf(file.lock(), format, ap)
 }
 
 #[no_mangle]

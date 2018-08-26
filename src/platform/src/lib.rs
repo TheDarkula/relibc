@@ -6,12 +6,15 @@
 #[cfg_attr(target_os = "redox", macro_use)]
 extern crate alloc;
 
-#[cfg(all(not(feature = "no_std"), target_os = "linux"))]
+#[cfg(target_os = "linux")]
 #[macro_use]
 extern crate sc;
 
-#[cfg(all(not(feature = "no_std"), target_os = "redox"))]
+#[cfg(target_os = "redox")]
 extern crate syscall;
+
+#[cfg(target_os = "redox")]
+extern crate spin;
 
 pub use allocator::*;
 
@@ -41,7 +44,7 @@ pub mod types;
 pub use rawfile::RawFile;
 pub use rlb::{Line, RawLineBuffer};
 
-use alloc::Vec;
+use alloc::vec::Vec;
 use core::{fmt, ptr};
 
 use types::*;
@@ -132,12 +135,12 @@ impl<'a, W: Write> Write for &'a mut W {
 }
 
 pub trait Read {
-    fn read_u8(&mut self, byte: &mut u8) -> bool;
+    fn read_u8(&mut self) -> Result<Option<u8>, ()>;
 }
 
 impl<'a, R: Read> Read for &'a mut R {
-    fn read_u8(&mut self, byte: &mut u8) -> bool {
-        (**self).read_u8(byte)
+    fn read_u8(&mut self) -> Result<Option<u8>, ()> {
+        (**self).read_u8()
     }
 }
 
@@ -172,11 +175,13 @@ impl FileReader {
 }
 
 impl Read for FileReader {
-    fn read_u8(&mut self, byte: &mut u8) -> bool {
-        let mut buf = [*byte];
-        let n = self.read(&mut buf);
-        *byte = buf[0];
-        n > 0
+    fn read_u8(&mut self) -> Result<Option<u8>, ()> {
+        let mut buf = [0];
+        match self.read(&mut buf) {
+            0 => Ok(None),
+            n if n < 0 => Err(()),
+            _ => Ok(Some(buf[0]))
+        }
     }
 }
 
@@ -184,19 +189,17 @@ pub struct StringWriter(pub *mut u8, pub usize);
 
 impl StringWriter {
     pub unsafe fn write(&mut self, buf: &[u8]) {
-        if self.1 > 0 {
+        if self.1 > 1 {
             let copy_size = buf.len().min(self.1 - 1);
             memcpy(
                 self.0 as *mut c_void,
                 buf.as_ptr() as *const c_void,
                 copy_size,
             );
-            *self.0.offset(copy_size as isize) = b'\0';
+            self.1 -= copy_size;
 
-            // XXX: i believe this correctly mimics the behavior from before, but it seems
-            //      incorrect (the next write will write after the NUL)
-            self.0 = self.0.offset(copy_size as isize + 1);
-            self.1 -= copy_size + 1;
+            self.0 = self.0.offset(copy_size as isize);
+            *self.0 = 0;
         }
     }
 }
@@ -246,13 +249,13 @@ impl Write for UnsafeStringWriter {
 pub struct StringReader<'a>(pub &'a [u8]);
 
 impl<'a> Read for StringReader<'a> {
-    fn read_u8(&mut self, byte: &mut u8) -> bool {
+    fn read_u8(&mut self) -> Result<Option<u8>, ()> {
         if self.0.is_empty() {
-            false
+            Ok(None)
         } else {
-            *byte = self.0[0];
+            let byte = self.0[0];
             self.0 = &self.0[1..];
-            true
+            Ok(Some(byte))
         }
     }
 }
@@ -260,15 +263,40 @@ impl<'a> Read for StringReader<'a> {
 pub struct UnsafeStringReader(pub *const u8);
 
 impl Read for UnsafeStringReader {
-    fn read_u8(&mut self, byte: &mut u8) -> bool {
+    fn read_u8(&mut self) -> Result<Option<u8>, ()> {
         unsafe {
             if *self.0 == 0 {
-                false
+                Ok(None)
             } else {
-                *byte = *self.0;
+                let byte = *self.0;
                 self.0 = self.0.offset(1);
-                true
+                Ok(Some(byte))
             }
         }
+    }
+}
+
+pub struct CountingWriter<T> {
+    pub inner: T,
+    pub written: usize
+}
+impl<T> CountingWriter<T> {
+    pub /* const */ fn new(writer: T) -> Self {
+        Self {
+            inner: writer,
+            written: 0
+        }
+    }
+}
+impl<T: fmt::Write> fmt::Write for CountingWriter<T> {
+    fn write_str(&mut self, s: &str) -> fmt::Result {
+        self.written += s.len();
+        self.inner.write_str(s)
+    }
+}
+impl<T: Write> Write for CountingWriter<T> {
+    fn write_u8(&mut self, byte: u8) -> fmt::Result {
+        self.written += 1;
+        self.inner.write_u8(byte)
     }
 }
