@@ -67,7 +67,7 @@ pub struct hostent {
     h_aliases: *mut *mut c_char,
     h_addrtype: c_int,
     h_length: c_int,
-    h_addr_list: *mut *mut in_addr,
+    h_addr_list: *mut *mut c_char,
 }
 
 #[repr(C)]
@@ -129,7 +129,7 @@ static mut HOST_ENTRY: hostent = hostent {
 static mut HOST_NAME: Option<Vec<u8>> = None;
 static mut HOST_ALIASES: Option<Vec<Vec<u8>>> = None;
 static mut HOST_ADDR: Option<in_addr> = None;
-static mut HOST_ADDR_LIST: [*mut in_addr; 2] = [ptr::null_mut(); 2];
+static mut HOST_ADDR_LIST: [*mut c_char; 2] = [ptr::null_mut(); 2];
 static mut _HOST_ADDR_LIST: [u8;4] = [0u8;4];
 static mut H_POS: usize = 0;
 static mut HOST_STAYOPEN: c_int = 0;
@@ -449,7 +449,10 @@ pub unsafe extern "C" fn gethostbyaddr(v: *const c_void, length: socklen_t, form
             if (*cp).is_null() {
                 break;
             }
-            if (**cp).s_addr == addr.s_addr {
+            let mut cp_slice: [i8;4] = [0i8;4];
+            (*cp).copy_to(cp_slice.as_mut_ptr(), 4);
+            let cp_s_addr = mem::transmute::<[i8;4], u32>(cp_slice);
+            if cp_s_addr == addr.s_addr {
                 sethostent(HOST_STAYOPEN);
                 return p;
             }
@@ -468,7 +471,7 @@ pub unsafe extern "C" fn gethostbyaddr(v: *const c_void, length: socklen_t, form
     match lookup_addr(addr) {
         Ok(s) => {
             _HOST_ADDR_LIST = mem::transmute::<u32, [u8;4]>(addr.s_addr);
-            HOST_ADDR_LIST = [_HOST_ADDR_LIST.as_mut_ptr() as *mut in_addr, ptr::null_mut()];
+            HOST_ADDR_LIST = [_HOST_ADDR_LIST.as_mut_ptr() as *mut c_char, ptr::null_mut()];
             let mut host_name = s[0].to_vec();
             HOST_NAME = Some(host_name);
             HOST_ENTRY = hostent {
@@ -545,7 +548,7 @@ pub unsafe extern "C" fn gethostbyname(name: *const c_char) -> *const hostent {
     let host_name: Vec<u8> = c_str(name).to_vec();
     HOST_NAME = Some(host_name);
     _HOST_ADDR_LIST = mem::transmute::<u32, [u8;4]>(host_addr.s_addr);
-    HOST_ADDR_LIST = [_HOST_ADDR_LIST.as_mut_ptr() as *mut in_addr, ptr::null_mut()];
+    HOST_ADDR_LIST = [_HOST_ADDR_LIST.as_mut_ptr() as *mut c_char, ptr::null_mut()];
     HOST_ADDR = Some(host_addr);
 
     //TODO actually get aliases
@@ -597,7 +600,7 @@ pub unsafe extern "C" fn gethostent() -> *const hostent {
     inet_aton(addr_cstr, &mut addr);
 
     _HOST_ADDR_LIST = mem::transmute::<u32, [u8;4]>(addr.s_addr);
-    HOST_ADDR_LIST = [_HOST_ADDR_LIST.as_mut_ptr() as *mut in_addr, ptr::null_mut()];
+    HOST_ADDR_LIST = [_HOST_ADDR_LIST.as_mut_ptr() as *mut c_char, ptr::null_mut()];
 
     HOST_ADDR = Some(addr);
 
@@ -647,6 +650,7 @@ pub unsafe extern "C" fn getnetent() -> *const netent {
     unimplemented!();
 }
 
+#[no_mangle]
 pub unsafe extern "C" fn getprotobyname(name: *const c_char) -> *const protoent {
     let mut p: *const protoent;
     setprotoent(PROTO_STAYOPEN);

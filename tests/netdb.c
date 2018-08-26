@@ -176,47 +176,7 @@ test_hosts (void)
   }
   //output_hostent("gethostbyaddr(\"8.8.4.4\")",google);
 }
-static void
-output_netent (const char *call, struct netent *nptr)
-{
-  char **pptr;
-  if (nptr == NULL)
-    printf ("Call: %s returned NULL\n", call);
-  else
-    {
-      struct in_addr ip;
-      ip.s_addr = htonl(nptr->n_net);
-      printf ("Call: %s, returned: n_name: %s, network_number: %s\n",
-              call, nptr->n_name, inet_ntoa (ip));
-      for (pptr = nptr->n_aliases; *pptr != NULL; pptr++)
-        printf ("  alias: %s\n", *pptr);
-    }
-}
-static void
-test_network (void)
-{
-  struct netent *nptr;
-  uint32_t ip;
-  /*
-     This test needs the following line in /etc/networks:
-     loopback        127.0.0.0
-  */
-  nptr = getnetbyname ("loopback");
-  // output_netent ("getnetbyname (\"loopback\")",nptr);
-  nptr = getnetbyname ("LoopBACK");
-  // output_netent ("getnetbyname (\"LoopBACK\")",nptr);
-  ip = inet_network ("127.0.0.0");
-  nptr = getnetbyaddr (ip, AF_INET);
-  // output_netent ("getnetbyaddr (inet_network (\"127.0.0.0\"), AF_INET)",nptr);
-  setnetent (0);
-  do
-    {
-      nptr = getnetent ();
-     // output_netent ("getnetent ()", nptr);
-    }
-  while (nptr != NULL);
-  endnetent ();
-}
+
 static void
 output_protoent (const char *call, struct protoent *prptr)
 {
